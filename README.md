@@ -1,4 +1,5 @@
-# 🚀 [Your Project Title Here]
+# 🚀 [Mission Readiness & Predictive Maintenance
+Copilot]
 
 > ⚠️ **Replace everything in `[ ]` brackets with your actual content before submission.**
 
@@ -8,10 +9,10 @@
 
 | Field | Value |
 |---|---|
-| **Team Name** | [Your Team Name] |
-| **Track** | [AI / DevOps / Sustainability / Open] |
-| **Team Lead** | [Name] — [email@ibm.com] |
-| **Members** | [Name 1], [Name 2], [Name 3] |
+| **Team Name** | [TeamX] |
+| **Track** | [AI] |
+| **Team Lead** | [Ayush] — [email@ibm.com] |
+| **Members** | [Yaksh], [Krish], [Het] |
 
 ---
 
@@ -19,7 +20,8 @@
 
 > In 2–3 sentences: What problem does your project solve? Who experiences this problem?
 
-[Describe the real-world problem your project addresses. Be specific about who the user is and what pain point they face.]
+[Military organisations struggle to determine whether aircraft, vehicles, and other equipment are truly mission-ready because maintenance is often based on fixed schedules rather than actual equipment condition. Maintenance teams and military operators face unexpected equipment failures because valuable HUMS sensor data and service records are not effectively analysed to predict component failures in advance. Our project helps identify non-ready assets, predict potential failures, explain readiness issues, and prioritise maintenance before the next mission.
+]
 
 ---
 
