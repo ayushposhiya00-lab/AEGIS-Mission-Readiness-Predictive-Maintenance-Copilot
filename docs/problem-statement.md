@@ -1,6 +1,6 @@
 # Problem Statement
 
-## Background
+## Background 
 
 In modern military, defense, and aerospace operations, mission success depends fundamentally on the operational availability and mechanical integrity of critical defense assets — including supersonic combat aircraft (e.g., Su-30MKI), attack helicopters (e.g., AH-64E Apache), main battle tanks (e.g., Arjun Mk-II, T-90 Bhishma), naval propulsion shafts (e.g., INS Vikrant), and autonomous unmanned ground/aerial vehicles (UGVs/UAVs).
 
