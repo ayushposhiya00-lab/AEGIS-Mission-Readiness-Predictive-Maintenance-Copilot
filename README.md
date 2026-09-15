@@ -105,7 +105,7 @@ Sitting on top of the models is a bilingual (English & Hinglish) **AI Copilot** 
 
 ```bash
 # 1. Clone the repository
-git clone https://github.com/drijesh-ppatel/bob-ai-hackathon-team-x.git
+git clone https://github.com/ayushposhiya00-lab/bob-ai-hackathon-team-x.git
 cd bob-ai-hackathon-team-x
 
 # 2. Run Backend (Terminal 1)
