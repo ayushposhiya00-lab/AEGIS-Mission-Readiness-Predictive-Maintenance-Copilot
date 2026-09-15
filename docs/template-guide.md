@@ -1,7 +1,7 @@
 # Bob AI Innovation Hackathon Submission Template — Complete Guide
 
 This guide explains how to use the
-[bob-ai-hackathon-submission-template](https://github.com/drijesh-ppatel/bob-ai-hackathon-submission-template)
+[bob-ai-hackathon-submission-template](https://github.com/ayushposhiya00-lab/bob-ai-hackathon-team-x.git)
 to structure and submit your hackathon entry.
 
 ---
@@ -42,14 +42,14 @@ The template gives every team a consistent, well-structured repository so that:
 
 ### Step 1 — Create your repo from the template
 
-1. Go to **[github.com/drijesh-ppatel/bob-ai-hackathon-submission-template](https://github.com/drijesh-ppatel/bob-ai-hackathon-submission-template)**
+1. Go to **[https://github.com/ayushposhiya00-lab/bob-ai-hackathon-team-x](https://github.com/ayushposhiya00-lab/bob-ai-hackathon-team-x.git)**
 2. Click the green **"Use this template"** button → **"Create a new repository"**
 
    > ⚠️ Use **"Use this template"**, not "Fork". A fork shows as derived from the
    > template in GitHub's UI and carries unnecessary history. The template button
    > gives you a clean, independent repo.
 
-3. Name your repo: **`bob-ai-hackathon-[your-team-name]`**
+3. Name your repo: **`bob-ai-hackathon-[TeamX]`**
    (e.g., `bob-ai-hackathon-orion-squad`, `bob-ai-hackathon-team-phoenix`)
 4. Set visibility to **Public** — judges need to access it
 5. Click **"Create repository"**
