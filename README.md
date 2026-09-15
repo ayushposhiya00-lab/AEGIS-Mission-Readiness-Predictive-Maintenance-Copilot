@@ -1,5 +1,5 @@
-# 🚀 [Mission Readiness & Predictive Maintenance
-Copilot]
+# 🚀 Mission Readiness & Predictive Maintenance
+Copilot
 
 > ⚠️ **Replace everything in `[ ]` brackets with your actual content before submission.**
 
@@ -9,10 +9,10 @@ Copilot]
 
 | Field | Value |
 |---|---|
-| **Team Name** | [TeamX] |
-| **Track** | [AI] |
-| **Team Lead** | [Ayush] — [email@ibm.com] |
-| **Members** | [Yaksh], [Krish], [Het] |
+| **Team Name** | TeamX |
+| **Track** | AI |
+| **Team Lead** | Ayush — 25dce092@charusat.edu.in |
+| **Members** | Yaksh , Krish , Het |
 
 ---
 
@@ -20,8 +20,8 @@ Copilot]
 
 > In 2–3 sentences: What problem does your project solve? Who experiences this problem?
 
-[Military organisations struggle to determine whether aircraft, vehicles, and other equipment are truly mission-ready because maintenance is often based on fixed schedules rather than actual equipment condition. Maintenance teams and military operators face unexpected equipment failures because valuable HUMS sensor data and service records are not effectively analysed to predict component failures in advance. Our project helps identify non-ready assets, predict potential failures, explain readiness issues, and prioritise maintenance before the next mission.
-]
+Military organisations struggle to determine whether aircraft, vehicles, and other equipment are truly mission-ready because maintenance is often based on fixed schedules rather than actual equipment condition. Maintenance teams and military operators face unexpected equipment failures because valuable HUMS sensor data and service records are not effectively analysed to predict component failures in advance. Our project helps identify non-ready assets, predict potential failures, explain readiness issues, and prioritise maintenance before the next mission.
+
 
 ---
 
@@ -29,17 +29,16 @@ Copilot]
 
 > In 2–3 sentences: What did you build? How does it solve the problem above?
 
-[Describe your solution clearly. Explain the core mechanism — what makes it work.]
-
----
+[We built an AI-powered Mission Readiness & Predictive Maintenance Copilot that analyzes equipment telemetry using trained ML models to predict failure risk, operational readiness, and remaining useful life (RUL) for aircraft, ground vehicles, and bearings. The system combines these predictions with explainable sensor-level analysis and an AI copilot to identify the main causes of risk, prioritize maintenance, and help maintenance teams make faster, data-driven decisions before a mission.]
 
 ## ✨ Key Features
 
-- **Feature 1:** [Brief description — e.g., "Real-time anomaly detection using watsonx.ai"]
-- **Feature 2:** [Brief description]
-- **Feature 3:** [Brief description]
-- **Feature 4:** [Optional]
-- **Feature 5:** [Optional]
+- **Real-Time Fleet Monitoring:** Continuously monitors aircraft, ground vehicles, and bearing assets using telemetry data and provides live asset status, health, alerts, and mission-readiness information.
+- **ML-Based Failure Prediction:** Uses trained machine learning models to predict the probability of equipment failure from sensor and operational data.
+- **Remaining Useful Life (RUL) Prediction:** Estimates how much useful operational life remains for supported assets, helping maintenance teams plan interventions before critical failure.
+- **Explainable AI Diagnostics:** Explains why an asset is considered high-risk by analyzing sensor values, deviations from baseline conditions, severity, and their contribution to the predicted risk.
+- **Predictive Maintenance Planning:** Converts high-risk predictions into prioritized maintenance actions, including repair tasks, urgency, crew assignment, spare-parts status, and mission impact.
+- **AI Mission Readiness Copilot:** Provides natural-language assistance for understanding fleet health, asset risks, diagnostics, readiness, and recommended maintenance actions.
 
 ---
 
@@ -47,29 +46,47 @@ Copilot]
 
 | Category | Technologies |
 |---|---|
-| **Languages** | [e.g., Python, TypeScript] |
-| **Frameworks** | [e.g., FastAPI, React] |
-| **IBM Technologies** | [e.g., watsonx.ai, IBM Bob, IBM Cloud] |
-| **Databases** | [e.g., PostgreSQL, Redis] |
-| **Other** | [e.g., Docker, GitHub Actions] |
+| **Languages** | Python, JavaScript (JSX) |
+| **Frameworks** | React 19, Vite, FastAPI |
+| **IBM Technologies** | IBM Bob - For Debugging And Code Review |
+| **Databases** | SQLite |
+| **Other** | scikit-learn, NumPy, pandas, Joblib, WebSockets, Lucide React |
 
 ---
 
 ## 📁 Repository Structure
 
 ```
-├── src/                  # All source code
-├── docs/                 # Written documentation
-│   ├── problem-statement.md
-│   ├── solution-overview.md
-│   ├── architecture.md
-│   └── setup-guide.md
-├── demo/                 # Demo artifacts
-│   ├── screenshots/      # App screenshots
-│   └── demo-video-link.txt  # Link to demo video
-├── presentation/         # Slide deck
-└── submission.yaml       # Structured submission metadata
-```
+├── src/
+│   ├── frontend/
+│   │   └── src/
+│   │       ├── components/
+│   │       │   ├── Assets/
+│   │       │   ├── Chat/
+│   │       │   ├── Dashboard/
+│   │       │   └── MaintenancePlan/
+│   │       ├── pages/
+│   │       ├── data/
+│   │       └── utils/
+│   │
+│   ├── backend/
+│   │   ├── ml/
+│   │   │   ├── predictor.py
+│   │   │   ├── explainer.py
+│   │   │   ├── ai4i.pkl
+│   │   │   ├── bearing.pkl
+│   │   │   └── failure_model.pkl
+│   │   ├── data/
+│   │   ├── database.py
+│   │   ├── main.py
+│   │   └── requirements.txt
+│   │
+│   └── project architecture
+│
+├── docs/
+├── demo/
+├── presentation/
+└── submission.yaml
 
 ---
 
