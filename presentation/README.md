@@ -1,7 +1,7 @@
 # Presentation
 
 Place your slide deck in this folder.
-
+ 
 ## Accepted Formats
 
   slides.pdf      ← Preferred (universally viewable)
