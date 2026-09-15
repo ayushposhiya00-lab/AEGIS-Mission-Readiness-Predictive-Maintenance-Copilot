@@ -3,7 +3,7 @@
 > **This file provides complete, step-by-step instructions to run and test the Mission Readiness & Predictive Maintenance Copilot locally.**
 
 ## Prerequisites
-
+  
 Before you begin, ensure you have the following installed on your machine:
 
 - [x] **Python 3.11+** (Verify with `python --version`)
