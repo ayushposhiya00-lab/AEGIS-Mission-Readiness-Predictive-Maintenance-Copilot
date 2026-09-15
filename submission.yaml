@@ -44,11 +44,11 @@ submission:
     Download Word file of maintenance plan and Print PDF file of perticular assest detail.
 
   tech_stack:
-    languages: "Python", "JavaScript", "SQL"
-    frameworks: "FastAPI", "React", "Vite", "Uvicorn"
-    ibm_technologies: "IBM Bob IDE-For Code Review And Debugging"
-    databases: "SQLite"
-    other: "scikit-learn", "Groq LPU", "WebSockets", "pandas", "NumPy", "joblib", "Lucide React"
+  languages: ["Python", "JavaScript", "SQL"]
+  frameworks: ["FastAPI", "React", "Vite", "Uvicorn"]
+  ibm_technologies: "IBM Bob IDE-For Code Review And Debugging"
+  databases: "SQLite"
+  other: ["scikit-learn", "Groq LPU", "WebSockets", "pandas", "NumPy", "joblib", "Lucide React"]
 
   what_we_are_most_proud_of: >
     Combining deterministic Explainable AI (XAI) feature attribution with an autonomous bilingual
