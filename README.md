@@ -6,7 +6,7 @@ An intelligent, multi-model predictive maintenance and fleet readiness system fo
 
 ---
 
-## 👥 Team
+## 👥 Team 
 
 | Field | Value |
 |---|---|
