@@ -1,4 +1,6 @@
-https://your-live-demo-url-here.com
+NOT DEPLOYED — run locally using docs/setup-guide.md
+
+localhost URL = http://localhost:5173/
 
 Replace the URL above with a link to your live/deployed demo.
 
