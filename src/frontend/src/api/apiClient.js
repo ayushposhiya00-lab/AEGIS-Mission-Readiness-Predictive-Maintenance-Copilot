@@ -213,6 +213,39 @@ export async function confirmRepairComplete(asset_id) {
   }
 }
 
+// Dispatch work order: restores asset to Normal (Mission-Ready) and decrements dashboard critical count
+export async function dispatchWorkOrder(orderId, assetId = null) {
+  try {
+    const url = assetId
+      ? `${BACKEND_URL}/api/work-orders/${encodeURIComponent(orderId)}/dispatch?asset_id=${encodeURIComponent(assetId)}`
+      : `${BACKEND_URL}/api/work-orders/${encodeURIComponent(orderId)}/dispatch`;
+    const res = await fetch(url, {
+      method: 'POST',
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return await res.json();
+  } catch (err) {
+    console.error('Error dispatching work order:', err);
+    return { status: 'error', message: err.message };
+  }
+}
+
+// Directly dispatch asset from AssetDetail: restores asset to normal
+export async function dispatchAsset(assetId, taskId = null) {
+  try {
+    const res = await fetch(`${BACKEND_URL}/api/assets/${encodeURIComponent(assetId)}/dispatch`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ taskId })
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return await res.json();
+  } catch (err) {
+    console.error('Error dispatching asset:', err);
+    return { status: 'error', message: err.message };
+  }
+}
+
 // Real-time WebSocket connection to /ws/telemetry
 export function createTelemetryWebSocket(onMessage, onStatusChange) {
   const wsUrl = BACKEND_URL.replace(/^http/, 'ws') + '/ws/telemetry';

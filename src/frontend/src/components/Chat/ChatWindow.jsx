@@ -11,7 +11,19 @@ const SUGGESTED_QUERIES = [
   { id: 'h5', label: '📊 Fleet readiness overview', prompt: 'Poore defense fleet ka overall readiness aur domain status kya hai?' }
 ];
 
-export default function ChatWindow({ isOpen, onClose, scopedAsset, onSelectAssetId, onNavigateTab, onWorkOrderDispatched }) {
+export default function ChatWindow({ 
+  isOpen, 
+  onClose, 
+  scopedAsset, 
+  onSelectAssetId, 
+  onNavigateTab, 
+  onWorkOrderDispatched,
+  onAssetAdded,
+  onAnomalyTriggered,
+  onRepairConfirmed,
+  onFilterStatus,
+  onRefreshData
+}) {
   const [messages, setMessages] = useState([
     {
       id: 1,
@@ -111,8 +123,21 @@ export default function ChatWindow({ isOpen, onClose, scopedAsset, onSelectAsset
           actionTaken: res.actionTaken || null
         }
       ]);
-      if (res.actionTaken?.type === 'WORK_ORDER_DISPATCHED' && onWorkOrderDispatched) {
-        onWorkOrderDispatched(res.actionTaken.order);
+      if (res.actionTaken) {
+        if (res.actionTaken.type === 'WORK_ORDER_DISPATCHED' && onWorkOrderDispatched) {
+          onWorkOrderDispatched(res.actionTaken.order);
+        } else if (res.actionTaken.type === 'ASSET_REGISTERED' && onAssetAdded) {
+          onAssetAdded(res.actionTaken.asset);
+        } else if (res.actionTaken.type === 'ANOMALY_TRIGGERED' && onAnomalyTriggered) {
+          onAnomalyTriggered(res.actionTaken.asset?.id, res.actionTaken.work_order);
+        } else if (res.actionTaken.type === 'REPAIR_CONFIRMED' && onRepairConfirmed) {
+          onRepairConfirmed(res.actionTaken.asset?.id);
+        } else if (res.actionTaken.type === 'NAVIGATE' && onNavigateTab) {
+          onNavigateTab(res.actionTaken.tab);
+        } else if (res.actionTaken.type === 'FILTER_STATUS' && onFilterStatus) {
+          onFilterStatus(res.actionTaken.status);
+        }
+        if (onRefreshData) onRefreshData();
       }
       if (res.source) {
         setActiveEngine(res.source);

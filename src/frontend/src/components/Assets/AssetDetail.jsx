@@ -20,7 +20,7 @@ import {
 import SensorTrendChart from './SensorTrendChart';
 import { fetchAssetExplanation } from '../../api/apiClient';
 
-export default function AssetDetail({ asset, onBack, onConsultCopilot, onDispatchOrder }) {
+export default function AssetDetail({ asset, onBack, onConsultCopilot, onDispatchOrder, onAnomalyInjected }) {
   if (!asset) return null;
 
   const [dispatchedTasks, setDispatchedTasks] = useState({});
@@ -179,6 +179,7 @@ export default function AssetDetail({ asset, onBack, onConsultCopilot, onDispatc
         telemetryHistory={asset.telemetryHistory} 
         assetId={asset.id}
         assetName={asset.name}
+        onAnomalyInjected={onAnomalyInjected}
       />
 
       {/* NEW: Explainable AI (XAI) Feature Attribution Waterfall */}

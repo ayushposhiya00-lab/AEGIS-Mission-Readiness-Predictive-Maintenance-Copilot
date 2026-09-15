@@ -1,11 +1,29 @@
+import random
+from datetime import datetime, timedelta
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, Any
 from ml.predictor import model_registry
 from ml.explainer import xai_explainer
 from database import save_custom_asset, get_all_custom_assets, get_all_persisted_work_orders
 
 router = APIRouter(prefix="/api", tags=["assets"])
+
+def generate_initial_telemetry_history(base_vib: float, base_pres: float, base_temp: float, count: int = 30) -> List[Dict[str, Any]]:
+    now = datetime.now()
+    history = []
+    for i in range(count):
+        step_time = now - timedelta(seconds=(count - 1 - i) * 2)
+        vib = round(max(0.35, base_vib + random.uniform(-0.06, 0.06)), 2)
+        pres = int(base_pres + random.uniform(-15, 15))
+        temp = round(base_temp + random.uniform(-1.5, 1.5), 1)
+        history.append({
+            "t": step_time.strftime("%H:%M:%S"),
+            "vibration": vib,
+            "pressure": pres,
+            "temp": temp
+        })
+    return history
 
 def get_dynamically_scored_assets():
     # Live ML Model Inferences
@@ -928,23 +946,40 @@ def get_dynamically_scored_assets():
             ]
         }
     ]
-    # Synchronize all base assets with live 1.25s IoT telemetry drift from TelemetryEngine
     try:
+        custom_assets = get_all_custom_assets()
+        combined = custom_assets + base_assets
+        for a in combined:
+            hist = a.get("telemetryHistory") or []
+            needs_gen = len(hist) < 20 or any("d" in str(pt.get("t", "")) for pt in hist)
+            if needs_gen:
+                vib = float(a.get("vibration", 1.20))
+                pres = float(a.get("pressure", 3000))
+                temp = float(a.get("temp", 68.0 if "armor" in str(a.get("type", "")).lower() else 660.0))
+                a["telemetryHistory"] = generate_initial_telemetry_history(vib, pres, temp, 30)
+                if hist and len(hist) > 0:
+                    last = hist[-1]
+                    if "vibration" in last: a["telemetryHistory"][-1]["vibration"] = last["vibration"]
+                    if "pressure" in last: a["telemetryHistory"][-1]["pressure"] = last["pressure"]
+                    if "temp" in last: a["telemetryHistory"][-1]["temp"] = last["temp"]
+
+        # Synchronize ALL assets (both base and custom) with live IoT TelemetryEngine state
         from api.routes_ws import manager
         if manager.fleet_state:
-            for a in base_assets:
-                aid = a["id"]
+            for a in combined:
+                aid = a["id"].upper()
                 if aid in manager.fleet_state:
                     live = manager.fleet_state[aid]
                     a["readinessScore"] = live["readinessScore"]
                     a["predictedRUL"] = live["predictedRUL"]
                     a["status"] = live["status"]
+                    a["isSpike"] = live.get("isSpike", False)
                     a["vibration"] = live["vibration"]
                     a["pressure"] = live["pressure"]
                     a["temp"] = live["temp"]
                     a["xaiAttribution"] = live.get("xaiAttribution") or xai_explainer.explain_asset(a)
 
-                    # Update sensors to reflect live 1.25s values
+                    # Update sensors to reflect live values
                     for s in a.get("contributingSensors", []):
                         sname = s.get("name", "").lower()
                         if "vibration" in sname:
@@ -964,14 +999,9 @@ def get_dynamically_scored_assets():
                         a["telemetryHistory"][-1]["vibration"] = live["vibration"]
                         a["telemetryHistory"][-1]["pressure"] = int(live["pressure"])
                         a["telemetryHistory"][-1]["temp"] = int(live["temp"])
-    except Exception as ex:
-        print(f"[routes_assets] Sync with manager.fleet_state warning: {ex}")
-
-    try:
-        custom_assets = get_all_custom_assets()
-        return custom_assets + base_assets
+        return combined
     except Exception as e:
-        print(f"Error fetching custom assets: {e}")
+        print(f"Error fetching/syncing assets: {e}")
         return base_assets
 
 
@@ -1052,14 +1082,15 @@ def register_asset(req: AssetRegisterRequest):
         "serviceHistory": [
             { "date": "2026-08-28", "event": "Registration & Initial Telemetry Calibration Run", "inspector": "Depot AI System", "status": "Completed" }
         ],
-        "telemetryHistory": [
-            { "t": "-28d", "vibration": max(0.5, round(req.vibration * 0.4, 2)), "pressure": int(req.pressure * 1.05), "temp": int(req.temp * 0.95) },
-            { "t": "-14d", "vibration": max(0.8, round(req.vibration * 0.7, 2)), "pressure": int(req.pressure * 1.02), "temp": int(req.temp * 0.98) },
-            { "t": "Now",  "vibration": req.vibration, "pressure": int(req.pressure), "temp": int(req.temp) }
-        ]
+        "telemetryHistory": generate_initial_telemetry_history(req.vibration, req.pressure, req.temp, 30)
     }
 
     save_custom_asset(asset_obj)
+    try:
+        from api.routes_ws import manager
+        manager.register_custom_asset(asset_obj)
+    except Exception as e:
+        print(f"Error registering custom asset with manager: {e}")
     return asset_obj
 
 @router.get("/assets")
@@ -1255,3 +1286,106 @@ def get_work_orders():
     persisted_ids = {o["id"] for o in persisted}
     filtered_base = [o for o in base_orders if o["id"] not in persisted_ids]
     return persisted + filtered_base
+
+@router.post("/work-orders/{order_id}/dispatch")
+async def dispatch_work_order_endpoint(order_id: str, asset_id: Optional[str] = None):
+    try:
+        from database import get_db_connection, save_work_order
+        from api.routes_ws import manager
+
+        target_aid = asset_id
+        conn = get_db_connection()
+        cursor = conn.cursor()
+
+        # Find asset_id if not explicitly provided
+        if not target_aid:
+            cursor.execute("SELECT asset_id FROM work_orders WHERE id = ?", (order_id,))
+            row = cursor.fetchone()
+            if row and row["asset_id"]:
+                target_aid = row["asset_id"]
+
+        # Base orders fallback check
+        base_orders_map = {
+            "WO-901": "A-317", "WO-902": "V-102", "WO-903": "V-210",
+            "WO-904": "A-711", "WO-905": "D-118", "WO-906": "N-011",
+            "WO-907": "A-205", "WO-908": "V-305", "WO-909": "E-045"
+        }
+        if not target_aid and order_id in base_orders_map:
+            target_aid = base_orders_map[order_id]
+
+        if not target_aid and order_id.startswith("WO-"):
+            parts = order_id.split("-")
+            if len(parts) >= 3:
+                cand = f"{parts[1]}-{parts[2]}" if len(parts) > 3 and not parts[2].isdigit() else parts[1]
+                if cand.upper() in manager.fleet_state:
+                    target_aid = cand
+
+        # Update SQLite table
+        cursor.execute("UPDATE work_orders SET status = 'Dispatched to Depot' WHERE id = ?", (order_id,))
+        if cursor.rowcount == 0 and order_id in base_orders_map:
+            # If not in SQLite, insert base order
+            save_work_order({
+                "id": order_id,
+                "assetId": target_aid,
+                "assetName": target_aid,
+                "task": f"Depot restoration for {target_aid}",
+                "priority": "critical",
+                "dueInHours": 12,
+                "assignedCrew": "Depot Fast Response Unit",
+                "partsStatus": "In Stock",
+                "status": "Dispatched to Depot",
+                "estimatedDowntime": "8 hrs",
+                "impact": "High"
+            })
+
+        conn.commit()
+        conn.close()
+
+        # Restore asset to NORMAL (ready), decrement critical count, and broadcast to all clients!
+        if target_aid:
+            dispatch_res = await manager.dispatch_asset(target_aid, order_id=order_id)
+            return {
+                "status": "success",
+                "order_id": order_id,
+                "asset_id": target_aid,
+                "new_status": "Dispatched to Depot",
+                "new_asset_status": "ready",
+                "metrics": manager.latest_metrics,
+                "details": dispatch_res
+            }
+        else:
+            manager.update_tick()
+            await manager.broadcast({
+                "type": "WORK_ORDER_DISPATCHED",
+                "order_id": order_id,
+                "assets": manager.fleet_state,
+                "metrics": manager.latest_metrics,
+                "timestamp": datetime.utcnow().strftime("%H:%M:%S")
+            })
+            return {
+                "status": "success",
+                "order_id": order_id,
+                "new_status": "Dispatched to Depot",
+                "metrics": manager.latest_metrics
+            }
+    except Exception as ex:
+        print(f"[dispatch_work_order_endpoint] Error: {ex}")
+        return {"status": "error", "message": str(ex)}
+
+
+class AssetDispatchRequest(BaseModel):
+    taskId: Optional[str] = None
+    orderId: Optional[str] = None
+
+@router.post("/assets/{asset_id}/dispatch")
+async def dispatch_asset_endpoint(asset_id: str, req: Optional[AssetDispatchRequest] = None):
+    """
+    Direct endpoint for AssetDetail / Copilot dispatch action:
+    Restores the asset from Critical to Normal ('ready'), creates/updates work order,
+    decrements Critical count on dashboard, and broadcasts live tick.
+    """
+    from api.routes_ws import manager
+    order_id = req.orderId if req else None
+    res = await manager.dispatch_asset(asset_id, order_id=order_id)
+    return res
+

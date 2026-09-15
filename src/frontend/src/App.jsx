@@ -12,7 +12,7 @@ import {
   DEFENSE_ASSETS, 
   MAINTENANCE_WORK_ORDERS 
 } from './data/mockDefenseData';
-import { fetchLiveAssets, fetchLiveMetrics, fetchLiveWorkOrders, createTelemetryWebSocket } from './api/apiClient';
+import { fetchLiveAssets, fetchLiveMetrics, fetchLiveWorkOrders, createTelemetryWebSocket, dispatchAsset } from './api/apiClient';
 
 export default function App() {
   const [currentTab, setCurrentTab] = useState('dashboard');
@@ -76,7 +76,14 @@ export default function App() {
     // 1.25s Live IoT Telemetry WebSocket Stream Listener
     const wsClient = createTelemetryWebSocket(
       (data) => {
-        if (data.type === 'STREAM_ESTABLISHED' || data.type === 'TELEMETRY_FULL_TICK' || data.type === 'REPAIR_COMPLETE') {
+        if (
+          data.type === 'STREAM_ESTABLISHED' ||
+          data.type === 'TELEMETRY_FULL_TICK' ||
+          data.type === 'REPAIR_COMPLETE' ||
+          data.type === 'ANOMALY_TRIGGERED' ||
+          data.type === 'ASSET_REGISTERED' ||
+          data.type === 'WORK_ORDER_DISPATCHED'
+        ) {
           setIsBackendLive(true);
           setLiveStreamConnected(true);
 
@@ -87,12 +94,77 @@ export default function App() {
             }));
           }
 
+          if (data.type === 'ASSET_REGISTERED' && data.asset) {
+            setAssets((prev) => {
+              if (prev.some((a) => a.id === data.asset.id)) return prev;
+              return [data.asset, ...prev];
+            });
+          }
+
+          if (data.work_order) {
+            setWorkOrders((prev) => {
+              const exists = prev.some((o) => o.id === data.work_order.id);
+              if (exists) {
+                return prev.map((o) => o.id === data.work_order.id ? data.work_order : o);
+              }
+              return [data.work_order, ...prev];
+            });
+          }
+
+          if (data.type === 'WORK_ORDER_DISPATCHED') {
+            if (data.asset_id) {
+              const aid = data.asset_id.toUpperCase();
+              setAssets((prev) =>
+                prev.map((a) =>
+                  a.id?.toUpperCase() === aid
+                    ? { ...a, status: 'ready', readinessScore: 96, isSpike: false }
+                    : a
+                )
+              );
+              setSelectedAsset((prev) =>
+                prev && prev.id?.toUpperCase() === aid
+                  ? { ...prev, status: 'ready', readinessScore: 96, isSpike: false }
+                  : prev
+              );
+              setWorkOrders((prev) =>
+                prev.map((o) =>
+                  o.assetId?.toUpperCase() === aid
+                    ? { ...o, status: 'Dispatched to Depot' }
+                    : o
+                )
+              );
+            }
+            if (data.order) {
+              setWorkOrders((prev) => {
+                const exists = prev.some((o) => o.id === data.order.id);
+                if (exists) {
+                  return prev.map((o) => o.id === data.order.id ? data.order : o);
+                }
+                return [data.order, ...prev];
+              });
+            } else if (data.order_id) {
+              setWorkOrders((prev) =>
+                prev.map((o) => o.id === data.order_id ? { ...o, status: 'Dispatched to Depot' } : o)
+              );
+            }
+          }
+
+          if (data.type === 'REPAIR_COMPLETE' && data.asset_id) {
+            setWorkOrders((prev) =>
+              prev.map((o) =>
+                o.assetId?.toUpperCase() === data.asset_id?.toUpperCase()
+                  ? { ...o, status: 'Repair Confirmed ✓' }
+                  : o
+              )
+            );
+          }
+
           if (data.assets) {
             const tickTime = data.timestamp || new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 
             setAssets((prevAssets) => {
               return prevAssets.map((asset) => {
-                const live = data.assets[asset.id];
+                const live = data.assets[asset.id] || data.assets[asset.id?.toUpperCase()];
                 if (!live) return asset;
 
                 const updatedSensors = (asset.contributingSensors || []).map((s) => {
@@ -150,8 +222,9 @@ export default function App() {
 
             // Keep selected asset in detail view synchronized live with sensors & XAI waterfall
             setSelectedAsset((prev) => {
-              if (!prev || !data.assets[prev.id]) return prev;
-              const live = data.assets[prev.id];
+              if (!prev) return prev;
+              const live = data.assets[prev.id] || data.assets[prev.id?.toUpperCase()];
+              if (!live) return prev;
 
               const updatedSensors = (prev.contributingSensors || []).map((s) => {
                 const sname = (s.name || '').toLowerCase();
@@ -235,24 +308,55 @@ export default function App() {
     setCurrentTab('assets');
   };
 
+  // Dispatches an asset: restores it to NORMAL (ready), decrements dashboard critical count, and updates work orders
+  const handleAssetDispatched = (assetId) => {
+    if (!assetId) return;
+    const aid = assetId.toUpperCase();
+    setAssets((prev) =>
+      prev.map((a) =>
+        a.id?.toUpperCase() === aid
+          ? { ...a, status: 'ready', readinessScore: 96, isSpike: false }
+          : a
+      )
+    );
+    setSelectedAsset((prev) =>
+      prev && prev.id?.toUpperCase() === aid
+        ? { ...prev, status: 'ready', readinessScore: 96, isSpike: false }
+        : prev
+    );
+    setWorkOrders((prev) =>
+      prev.map((o) =>
+        o.assetId?.toUpperCase() === aid
+          ? { ...o, status: 'Dispatched to Depot' }
+          : o
+      )
+    );
+    loadData();
+  };
+
   // Dispatch an action from Asset Detail
-  const handleDispatchOrder = (asset, taskId) => {
-    setWorkOrders((prev) => [
-      {
-        id: `WO-SURGE-${Math.floor(100 + Math.random() * 900)}`,
-        assetId: asset.id,
-        assetName: `${asset.name}`,
-        task: `Depot Task: ${asset.actionPlan.find(a => a.id === taskId)?.task || 'Urgent repair'}`,
-        priority: 'critical',
-        dueInHours: 12,
-        assignedCrew: 'Central Defense Depot Response Unit',
-        partsStatus: 'In Stock',
-        status: 'Dispatched to Depot',
-        estimatedDowntime: '8 hrs',
-        impact: 'High (Immediate Sortie Release)'
-      },
-      ...prev
-    ]);
+  const handleDispatchOrder = async (asset, taskId) => {
+    handleAssetDispatched(asset.id);
+    const newOrderId = `WO-${asset.id}-${Math.floor(100 + Math.random() * 900)}`;
+    const newOrder = {
+      id: newOrderId,
+      assetId: asset.id,
+      assetName: `${asset.name}`,
+      task: `Depot Task: ${asset.actionPlan?.find(a => a.id === taskId)?.task || 'Urgent repair & recalibration'}`,
+      priority: 'critical',
+      dueInHours: 12,
+      assignedCrew: 'Central Defense Depot Response Unit',
+      partsStatus: 'In Stock',
+      status: 'Dispatched to Depot',
+      estimatedDowntime: '8 hrs',
+      impact: 'High (Immediate Sortie Release)'
+    };
+    setWorkOrders((prev) => [newOrder, ...prev.filter(o => o.id !== newOrderId)]);
+    try {
+      await dispatchAsset(asset.id, taskId);
+    } catch (e) {
+      console.error("dispatchAsset error:", e);
+    }
   };
 
   return (
@@ -263,6 +367,9 @@ export default function App() {
         setCurrentTab={(tab) => {
           setSelectedAsset(null);
           setCurrentTab(tab);
+          if (tab === 'maintenance' || tab === 'dashboard') {
+            loadData();
+          }
         }}
         criticalCount={liveMetrics.criticalNonReady}
         isBackendLive={isBackendLive}
@@ -282,6 +389,27 @@ export default function App() {
             onBack={() => setSelectedAsset(null)}
             onConsultCopilot={handleConsultCopilot}
             onDispatchOrder={handleDispatchOrder}
+            onAnomalyInjected={(newWo) => {
+              if (newWo) {
+                setWorkOrders((prev) => [newWo, ...prev.filter((o) => o.id !== newWo.id)]);
+              }
+              const targetAid = (selectedAsset?.id || newWo?.assetId || '').toUpperCase();
+              if (targetAid) {
+                setAssets((prev) =>
+                  prev.map((a) =>
+                    a.id?.toUpperCase() === targetAid
+                      ? { ...a, status: 'critical', readinessScore: 32, isSpike: true }
+                      : a
+                  )
+                );
+                setSelectedAsset((prev) =>
+                  prev && prev.id?.toUpperCase() === targetAid
+                    ? { ...prev, status: 'critical', readinessScore: 32, isSpike: true }
+                    : prev
+                );
+              }
+              loadData();
+            }}
           />
         ) : (
           <>
@@ -322,6 +450,12 @@ export default function App() {
                   const matched = assets.find((a) => a.id === assetId);
                   if (matched) setSelectedAsset(matched);
                 }}
+                onUpdateOrders={(updated) => {
+                  setWorkOrders(updated);
+                }}
+                onRepairComplete={(assetId) => {
+                  handleAssetDispatched(assetId);
+                }}
               />
             )}
           </>
@@ -351,9 +485,39 @@ export default function App() {
           setCurrentTab(tab);
         }}
         onWorkOrderDispatched={(newOrder) => {
-          setWorkOrders((prev) => [newOrder, ...prev]);
+          if (newOrder) {
+            setWorkOrders((prev) => [newOrder, ...prev.filter(o => o.id !== newOrder.id)]);
+            if (newOrder.assetId) {
+              handleAssetDispatched(newOrder.assetId);
+            }
+          }
           loadData();
         }}
+        onAssetAdded={(newAsset) => {
+          setAssets((prev) => [newAsset, ...prev.filter(a => a.id !== newAsset.id)]);
+          loadData();
+        }}
+        onAnomalyTriggered={(assetId, workOrder) => {
+          if (workOrder) {
+            setWorkOrders((prev) => [workOrder, ...prev.filter(o => o.id !== workOrder.id)]);
+          }
+          if (assetId) {
+            const aid = assetId.toUpperCase();
+            setAssets((prev) =>
+              prev.map((a) =>
+                a.id?.toUpperCase() === aid
+                  ? { ...a, status: 'critical', readinessScore: 32, isSpike: true }
+                  : a
+              )
+            );
+          }
+          loadData();
+        }}
+        onRepairConfirmed={(assetId) => {
+          handleAssetDispatched(assetId);
+        }}
+        onFilterStatus={handleFilterStatus}
+        onRefreshData={loadData}
       />
     </div>
   );
