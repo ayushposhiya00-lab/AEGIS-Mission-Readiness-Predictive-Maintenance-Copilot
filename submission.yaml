@@ -35,13 +35,13 @@ submission:
     AI4I Ground Armor, NASA N-CMAPSS Turbofan), Explainable AI (XAI) feature attribution, live WebSocket
     telemetry streaming, and a bilingual Groq LPU Llama 3.3 70B Copilot that autonomously creates work orders.
 
-  key_features:
-    - "Multi-Model ML Predictive Engine (NASA IMS Bearing, AI4I Ground Armor, NASA N-CMAPSS Turbofan)"
-    - "Explainable AI (XAI) Feature Attribution with mathematical percentage contribution breakdown"
-    - "Bilingual Autonomous AI Copilot (English & Hinglish) powered by Groq LPU Llama 3.3 70B & defense RAG"
-    - "Real-Time WebSocket Telemetry Streaming with interactive mechanical anomaly fault injection"
-    - "High-Speed Vectorized Batch Telemetry Ingestion scoring 5,000+ records in under 1 second"
-    - "Download Word file of maintenance plan and Print PDF file of perticular assest detail."  
+  key_features: >
+    - Multi-Model ML Predictive Engine (NASA IMS Bearing, AI4I Ground Armor, NASA N-CMAPSS Turbofan)
+    - Explainable AI (XAI) Feature Attribution with mathematical percentage contribution breakdown
+    - Bilingual Autonomous AI Copilot (English & Hinglish) powered by Groq LPU Llama 3.3 70B & defense RAG
+    - Real-Time WebSocket Telemetry Streaming with interactive mechanical anomaly fault injection
+    - High-Speed Vectorized Batch Telemetry Ingestion scoring 5,000+ records in under 1 second
+    - Download Word file of maintenance plan and Print PDF file of perticular assest detail.
 
   tech_stack:
     languages: "Python", "JavaScript", "SQL"
