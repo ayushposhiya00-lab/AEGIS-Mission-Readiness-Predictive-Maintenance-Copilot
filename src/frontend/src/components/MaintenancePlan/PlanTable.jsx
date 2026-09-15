@@ -14,19 +14,46 @@ import {
 import ReportPreviewModal from './ReportPreviewModal';
 import { generateWordDoc } from '../../utils/reportGenerator';
 import { DEFENSE_ASSETS, DEFENSE_SYSTEM_METRICS } from '../../data/mockDefenseData';
-import { confirmRepairComplete } from '../../api/apiClient';
+import { confirmRepairComplete, dispatchWorkOrder } from '../../api/apiClient';
 
-export default function PlanTable({ workOrders: initialOrders, onSelectAssetId }) {
-  const [orders, setOrders] = useState(initialOrders);
+export default function PlanTable({ workOrders: initialOrders, onSelectAssetId, onUpdateOrders, onRepairComplete }) {
+  const [orders, setOrders] = useState(initialOrders || []);
   const [syncNotice, setSyncNotice] = useState(null);
   const [repairNotice, setRepairNotice] = useState(null);
   const [isReportModalOpen, setIsReportModalOpen] = useState(false);
   const [repairLoading, setRepairLoading] = useState({}); // track per-order loading state
 
-  const handleDispatch = (id) => {
-    setOrders((prev) =>
-      prev.map((o) => (o.id === id ? { ...o, status: 'Dispatched to Depot' } : o))
+  // Keep local orders state in sync with real-time prop updates from WebSocket and Copilot
+  React.useEffect(() => {
+    if (initialOrders) {
+      setOrders(initialOrders);
+    }
+  }, [initialOrders]);
+
+  const handleDispatch = async (id) => {
+    const targetOrder = orders.find((o) => o.id === id);
+    const assetId = targetOrder?.assetId;
+
+    setOrders((prev) => {
+      const updated = prev.map((o) => (o.id === id ? { ...o, status: 'Dispatched to Depot' } : o));
+      if (onUpdateOrders) onUpdateOrders(updated);
+      return updated;
+    });
+
+    try {
+      await dispatchWorkOrder(id, assetId);
+    } catch (e) {
+      console.error("Dispatch work order error:", e);
+    }
+
+    if (onRepairComplete && assetId) {
+      onRepairComplete(assetId);
+    }
+
+    setRepairNotice(
+      `✅ Work order ${id} dispatched! ${targetOrder?.assetName || assetId} restored to Mission-Ready (Normal). Dashboard metrics updated.`
     );
+    setTimeout(() => setRepairNotice(null), 7000);
   };
 
   const handleRepairComplete = async (order) => {
@@ -35,9 +62,12 @@ export default function PlanTable({ workOrders: initialOrders, onSelectAssetId }
       await confirmRepairComplete(order.assetId);
     } catch (e) { /* fire-and-forget */ }
     setRepairLoading((prev) => ({ ...prev, [order.id]: false }));
-    setOrders((prev) =>
-      prev.map((o) => (o.id === order.id ? { ...o, status: 'Repair Confirmed ✓' } : o))
-    );
+    setOrders((prev) => {
+      const updated = prev.map((o) => (o.id === order.id ? { ...o, status: 'Repair Confirmed ✓' } : o));
+      if (onUpdateOrders) onUpdateOrders(updated);
+      return updated;
+    });
+    if (onRepairComplete) onRepairComplete(order.assetId);
     setRepairNotice(
       `✅ Engineer confirmed repair on ${order.assetName} (${order.assetId}). Asset restored to NOMINAL. Live telemetry resumes in ~12s.`
     );
@@ -283,27 +313,30 @@ export default function PlanTable({ workOrders: initialOrders, onSelectAssetId }
                         <ShieldCheck size={13} /> Done
                       </span>
                     ) : isDispatched ? (
-                      // Dispatched → show green Confirm Complete button
-                      <button
-                        onClick={() => handleRepairComplete(order)}
-                        disabled={!!repairLoading[order.id]}
-                        className="btn btn-sm btn-primary"
-                        style={{
-                          background: repairLoading[order.id]
-                            ? 'rgba(16,185,129,0.3)'
-                            : 'linear-gradient(135deg,#059669,#0d9488)',
-                          border: 'none',
-                          display: 'flex', alignItems: 'center', gap: '5px',
-                          fontSize: '0.78rem'
-                        }}
-                        title="Mark repair as complete — asset returns to nominal"
-                      >
-                        {repairLoading[order.id] ? (
-                          <span style={{ opacity: 0.7 }}>Confirming…</span>
-                        ) : (
-                          <><ShieldCheck size={13} /><span>Confirm Complete</span></>
-                        )}
-                      </button>
+                      <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                        <span style={{
+                          display: 'inline-flex', alignItems: 'center', gap: '4px',
+                          padding: '3px 8px', borderRadius: 'var(--radius-sm)',
+                          background: 'rgba(16,185,129,0.15)',
+                          border: '1px solid rgba(16,185,129,0.4)',
+                          color: '#34d399', fontSize: '0.74rem', fontWeight: 600
+                        }}>
+                          <CheckCircle2 size={12} /> Dispatched (Normal)
+                        </span>
+                        <button
+                          onClick={() => handleRepairComplete(order)}
+                          disabled={!!repairLoading[order.id]}
+                          className="btn btn-sm btn-ghost"
+                          style={{
+                            padding: '2px 6px',
+                            fontSize: '0.7rem',
+                            color: 'var(--text-muted)'
+                          }}
+                          title="Final depot engineer sign-off"
+                        >
+                          {repairLoading[order.id] ? 'Signing…' : 'Sign Off'}
+                        </button>
+                      </div>
                     ) : (
                       // Not yet dispatched — show Dispatch button
                       <button

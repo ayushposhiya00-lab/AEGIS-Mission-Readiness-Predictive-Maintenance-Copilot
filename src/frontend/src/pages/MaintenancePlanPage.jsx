@@ -1,7 +1,16 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import PlanTable from '../components/MaintenancePlan/PlanTable';
+import { fetchLiveWorkOrders } from '../api/apiClient';
 
-export default function MaintenancePlanPage({ workOrders, onSelectAssetId }) {
+export default function MaintenancePlanPage({ workOrders, onSelectAssetId, onUpdateOrders, onRepairComplete }) {
+  useEffect(() => {
+    fetchLiveWorkOrders().then((res) => {
+      if (res?.data && onUpdateOrders) {
+        onUpdateOrders(res.data);
+      }
+    });
+  }, []);
+
   return (
     <div>
       <div style={{ marginBottom: '24px' }}>
@@ -16,7 +25,10 @@ export default function MaintenancePlanPage({ workOrders, onSelectAssetId }) {
       <PlanTable
         workOrders={workOrders}
         onSelectAssetId={onSelectAssetId}
+        onUpdateOrders={onUpdateOrders}
+        onRepairComplete={onRepairComplete}
       />
     </div>
   );
 }
+

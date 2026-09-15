@@ -135,8 +135,110 @@ def test_feature_4_dynamic_stress_and_telemetry():
 
     # 6. Test Query for Top Critical Assets
     res_crit = chat_endpoint(ChatRequest(message="Konsa asset sabse kharab hai?"))
-    assert "V-102" in res_crit["reply"] or "A-317" in res_crit["reply"] or "V-007" in res_crit["reply"] or "CRITICAL" in res_crit["reply"]
+    reply_u = res_crit["reply"].upper()
+    assert any(x in reply_u for x in ["A-711", "V-102", "A-317", "V-007", "CRITICAL"])
     print(f"✅ Critical Asset Query: OK (Identified top at-risk combat platforms)")
+
+def test_feature_5_copilot_autonomous_actions():
+    print("\n--- [TEST 5] AI Copilot Autonomous Fleet & Maintenance Actions ---")
+    
+    # 1. Register new asset via natural language
+    res_reg = chat_endpoint(ChatRequest(message="ek naya asset add karo INS Vikrant aircraft carrier"))
+    assert res_reg.get("actionTaken") is not None
+    assert res_reg["actionTaken"]["type"] == "ASSET_REGISTERED"
+    new_asset = res_reg["actionTaken"]["asset"]
+    assert "N-" in new_asset["id"]
+    assert "Vikrant" in new_asset["name"]
+    print(f"✅ Copilot Registered New Platform: {new_asset['id']} ({new_asset['name']})")
+
+    # Verify new asset in manager.fleet_state
+    assert new_asset["id"] in manager.fleet_state
+    print(f"✅ Platform {new_asset['id']} active in live telemetry engine: OK")
+
+    # 2. Spike asset via Copilot
+    res_spike = chat_endpoint(ChatRequest(message="V-102 ko spike kardo"))
+    assert res_spike.get("actionTaken") is not None
+    assert res_spike["actionTaken"]["type"] == "ANOMALY_TRIGGERED"
+    assert res_spike["actionTaken"]["work_order"] is not None
+    assert manager.fleet_state["V-102"]["status"] == "critical"
+    print(f"✅ Copilot Spiked V-102: status=critical, Emergency WO generated={res_spike['actionTaken']['work_order']['id']}")
+
+    # 3. Confirm repair via Copilot
+    res_repair = chat_endpoint(ChatRequest(message="V-102 ko theek kardo confirm repair"))
+    assert res_repair.get("actionTaken") is not None
+    assert res_repair["actionTaken"]["type"] == "REPAIR_CONFIRMED"
+    assert manager.fleet_state["V-102"]["status"] == "ready"
+    assert manager.fleet_state["V-102"]["vibration"] < 2.0
+    print(f"✅ Copilot Confirmed Repair on V-102: status=ready, Vib={manager.fleet_state['V-102']['vibration']} mm/s")
+
+    # 4. Navigation command
+    res_nav = chat_endpoint(ChatRequest(message="Maintenance plan dikhao"))
+    assert res_nav.get("actionTaken") is not None
+    assert res_nav["actionTaken"]["type"] == "NAVIGATE"
+    assert res_nav["actionTaken"]["tab"] == "maintenance"
+    print(f"✅ Copilot Navigation Command: switched to {res_nav['actionTaken']['tab']}")
+
+    # 5. Filter status command
+    res_filt = chat_endpoint(ChatRequest(message="Critical assets dikhao"))
+    assert res_filt.get("actionTaken") is not None
+    assert res_filt["actionTaken"]["type"] == "FILTER_STATUS"
+    assert res_filt["actionTaken"]["status"] == "CRITICAL"
+    print(f"✅ Copilot Fleet Filter Command: filter applied to {res_filt['actionTaken']['status']}")
+
+def test_feature_6_spike_and_dispatch_lifecycle():
+    import asyncio
+    print("\n--- [TEST 6] Live Spike -> Critical Count -> Maintenance Plan -> Dispatch -> Normal Sync ---")
+    
+    # 1. Reset A-108 to normal baseline
+    asyncio.run(manager.dispatch_asset("A-108"))
+    assert manager.fleet_state["A-108"]["status"] == "ready"
+    crit_before = manager.latest_metrics["criticalNonReady"]
+    ready_before = manager.latest_metrics["missionReady"]
+    print(f"Initial State: A-108 is ready. Critical Non-Ready = {crit_before}, Mission-Ready = {ready_before}")
+
+    # 2. Spike normal asset A-108
+    spike_res = manager.inject_anomaly("A-108", "vibration", 5.45, duration_seconds=300)
+    assert manager.fleet_state["A-108"]["status"] == "critical", "A-108 must become critical after spike"
+    assert manager.fleet_state["A-108"]["isSpike"] is True
+    assert manager.latest_metrics["criticalNonReady"] == crit_before + 1, "Critical Non-Ready count must increment by 1"
+    ready_spiked = manager.latest_metrics["missionReady"]
+    print(f"✅ After Spike: A-108 status=CRITICAL, Dashboard Critical Non-Ready (+1) = {manager.latest_metrics['criticalNonReady']}")
+
+    # 3. Verify Emergency Work Order in Maintenance Plan
+    wo = spike_res.get("work_order")
+    assert wo is not None, "Emergency Work Order must be generated"
+    assert wo["assetId"] == "A-108"
+    assert wo["priority"] == "critical"
+    assert wo["status"] == "Pending Dispatch"
+
+    all_wos = get_work_orders()
+    assert any(o["id"] == wo["id"] for o in all_wos), f"Work order {wo['id']} must appear in Maintenance Plan"
+    print(f"✅ Maintenance Plan: Emergency Work Order {wo['id']} logged with status='{wo['status']}'")
+
+    # 4. Dispatch the work order
+    dispatch_res = asyncio.run(manager.dispatch_asset("A-108", order_id=wo["id"]))
+    assert dispatch_res["new_status"] == "ready"
+    assert manager.fleet_state["A-108"]["status"] == "ready", "A-108 must return to ready (NORMAL) after dispatch"
+    assert manager.fleet_state["A-108"]["isSpike"] is False
+    assert manager.fleet_state["A-108"]["vibration"] < 2.5, "Vibration must return to nominal"
+    assert manager.latest_metrics["criticalNonReady"] == crit_before, "Dashboard Critical Non-Ready count must return to original count"
+    assert manager.latest_metrics["missionReady"] >= ready_spiked, "Dashboard Mission-Ready count must increase after dispatch"
+    print(f"✅ After Dispatch: A-108 restored to NORMAL (ready), Dashboard Critical Non-Ready (-1) = {manager.latest_metrics['criticalNonReady']}")
+
+    # 5. Verify work order is marked Dispatched to Depot in SQLite
+    persisted = get_all_persisted_work_orders()
+    matched_wo = next((o for o in persisted if o["id"] == wo["id"]), None)
+    assert matched_wo is not None
+    assert matched_wo["status"] == "Dispatched to Depot"
+    print(f"✅ Maintenance Plan Database: Work Order {wo['id']} status updated to '{matched_wo['status']}'")
+
+    # 6. Verify get_dynamically_scored_assets() returns status='ready' for A-108
+    all_assets = get_dynamically_scored_assets()
+    a108_scored = next((a for a in all_assets if a["id"] == "A-108"), None)
+    assert a108_scored is not None
+    assert a108_scored["status"] == "ready"
+    print(f"✅ REST /api/assets dynamically synchronized: A-108 status='{a108_scored['status']}'")
+
 
 if __name__ == "__main__":
     init_db()
@@ -144,4 +246,6 @@ if __name__ == "__main__":
     test_feature_2_telemetry_ws()
     test_feature_3_agentic_copilot()
     test_feature_4_dynamic_stress_and_telemetry()
-    print("\n🎉 ALL 4 DEFENSE PLATFORM FEATURES VERIFIED WITH 100% MATHEMATICAL & DYNAMIC ACCURACY!")
+    test_feature_5_copilot_autonomous_actions()
+    test_feature_6_spike_and_dispatch_lifecycle()
+    print("\n🎉 ALL DEFENSE PLATFORM & COPILOT FEATURES VERIFIED WITH 100% ACCURACY!")

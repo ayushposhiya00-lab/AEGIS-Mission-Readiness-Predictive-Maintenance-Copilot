@@ -1,17 +1,19 @@
 import os
 import re
 import json
+import time
+from datetime import datetime
 import requests
 from typing import Optional, List, Dict, Any, Tuple
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 import random
-from api.routes_assets import get_dynamically_scored_assets, get_metrics, get_work_orders
-from database import get_all_batches, save_work_order
+from api.routes_assets import get_dynamically_scored_assets, get_metrics, get_work_orders, generate_initial_telemetry_history
+from database import get_all_batches, save_work_order, save_custom_asset, get_all_custom_assets, get_db_connection
 from ml.explainer import xai_explainer
 from ml.predictor import model_registry
-from api.routes_ws import manager
+from api.routes_ws import manager, _repair_hold
 
 def load_env_file():
     backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -469,6 +471,261 @@ def execute_agentic_tool(user_query: str, matched_assets: List[Dict[str, Any]], 
     Executes real database state changes and counterfactual simulations upon commander command.
     """
     q = user_query.lower()
+    # 0. TOOL 0: REGISTER NEW ASSET (AI COPILOT DYNAMIC FLEET ADDITION)
+    register_triggers = ['add asset', 'register asset', 'naya asset', 'new asset', 'create asset', 'asset register', 'asset add', 'banao asset', 'platform add', 'add platform', 'register platform', 'asset dalo']
+    is_add_asset = any(t in q for t in register_triggers) or (any(w in q for w in ['add', 'register', 'naya', 'create', 'banao']) and any(w in q for w in ['asset', 'tank', 'aircraft', 'fighter', 'ship', 'carrier', 'frigate', 'destroyer', 'ugv', 'helicopter']))
+    if is_add_asset:
+        clean_name = user_query
+        for noise in [
+            'ek naya asset add karo', 'naya asset add karo', 'naya asset banao',
+            'add new asset', 'register new asset', 'add asset', 'register asset',
+            'create asset', 'new asset', 'add platform', 'register platform',
+            'ek naya', 'naya asset', 'asset add karo', 'add karo', 'register karo',
+            'banao', 'karo', 'kardo', 'please', 'can you', 'ko add'
+        ]:
+            clean_name = re.sub(r'\b' + re.escape(noise) + r'\b', '', clean_name, flags=re.IGNORECASE)
+        clean_name = re.sub(r'[^\w\s\-]', '', clean_name).strip()
+        if not clean_name or len(clean_name) < 2:
+            clean_name = "INS Vishal Aircraft Carrier"
+
+        cl_lower = clean_name.lower()
+        if any(w in cl_lower or w in q for w in ['ship', 'carrier', 'destroyer', 'frigate', 'corvette', 'naval', 'submarine', 'ins', 'samudra', 'vikrant', 'vishal']):
+            atype = "Naval"
+            category = "Naval Strike Group"
+            model_type = "bearing"
+            base_temp = 660.0
+            base_pres = 3020.0
+            base_vib = 1.15
+            id_prefix = "N"
+        elif any(w in cl_lower or w in q for w in ['tank', 'mbt', 'armor', 'ugv', 'howitzer', 'bmp', 'namica', 'whap', 'arjun', 't-90', 'vajra']):
+            atype = "Ground Armor"
+            category = "Ground Armored Fleet"
+            model_type = "armor"
+            base_temp = 68.0
+            base_pres = 2950.0
+            base_vib = 1.60
+            id_prefix = "V"
+        else:
+            atype = "Aircraft"
+            category = "Combat Aircraft"
+            model_type = "turbofan" if any(w in cl_lower for w in ['rafale', 'tejas', 'mirage', 'jaguar']) else "bearing"
+            base_temp = 670.0
+            base_pres = 3000.0
+            base_vib = 1.10
+            id_prefix = "A"
+
+        existing_ids = {a["id"].upper() for a in all_assets}
+        rand_id_num = random.randint(100, 999)
+        new_id = f"{id_prefix}-{rand_id_num}"
+        while new_id in existing_ids:
+            rand_id_num = random.randint(100, 999)
+            new_id = f"{id_prefix}-{rand_id_num}"
+
+        asset_obj = {
+            "id": new_id,
+            "callsign": f"SENTINEL-{rand_id_num}",
+            "name": clean_name.title(),
+            "type": atype,
+            "category": category,
+            "status": "ready",
+            "readinessScore": 94,
+            "predictedRUL": 60,
+            "operationalBase": "Central Forward Command Depot",
+            "crewAssigned": "Tactical Wing Crew Alpha",
+            "lastServiceDate": datetime.now().strftime("%Y-%m-%d"),
+            "nextScheduledService": datetime.now().strftime("%Y-11-15"),
+            "flightHours": random.randint(120, 650),
+            "mlModelApplied": f"{model_type.capitalize()} AI Predictive Model",
+            "failureRiskDescription": "Initial calibration run verified. All subsystem sensor metrics within optimal operational thresholds.",
+            "copilotAnalysis": f"AI automated baseline registration completed. Real-time telemetry monitoring initialized on {model_type.upper()} model.",
+            "contributingSensors": [
+                { "name": "Telemetry Vibration RMS", "current": f"{base_vib} mm/s", "baseline": f"{base_vib} mm/s", "status": "nominal", "delta": "0.0%" },
+                { "name": "Hydraulic System Pressure", "current": f"{int(base_pres)} PSI", "baseline": "3000 PSI", "status": "nominal", "delta": "+0.2%" },
+                { "name": "Operating Thermal Sensor", "current": f"{base_temp} °C", "baseline": f"{base_temp} °C", "status": "nominal", "delta": "0.0%" }
+            ],
+            "actionPlan": [
+                { "id": f"AP-{new_id}-1", "task": "Scheduled telemetry calibration check", "priority": "low", "eta": "2 hrs", "crew": "Tactical Wing Crew Alpha", "partsAvailable": True }
+            ],
+            "serviceHistory": [
+                { "date": datetime.now().strftime("%Y-%m-%d"), "event": "Registration & Initial Telemetry Calibration Run", "inspector": "Depot AI Copilot", "status": "Completed" }
+            ],
+            "telemetryHistory": generate_initial_telemetry_history(base_vib, base_pres, base_temp, 30)
+        }
+
+        save_custom_asset(asset_obj)
+        manager.register_custom_asset(asset_obj)
+
+        try:
+            import asyncio
+            asyncio.create_task(manager.broadcast({
+                "type": "ASSET_REGISTERED",
+                "asset": asset_obj,
+                "metrics": manager.latest_metrics,
+                "assets": manager.fleet_state
+            }))
+        except Exception:
+            pass
+
+        if is_hinglish:
+            reply = (
+                f"Commander, Naya Asset **{asset_obj['id']} ({asset_obj['name']})** successfully FLEET me add kar diya gaya hai! 🛡️\n\n"
+                f"• Category: **{category}** ({atype})\n"
+                f"• Assigned Base: **{asset_obj['operationalBase']}**\n"
+                f"• Status: **READY (Combat Operational - 94% Readiness)**\n"
+                f"• Sensor Baselines: Vibration **{base_vib} mm/s**, Pressure **{int(base_pres)} PSI**, Temp **{base_temp} °C**\n\n"
+                f"Live IoT Telemetry Stream (2.0s) initialize ho chuka hai aur ye asset Dashboard fleet overview me live visible hai."
+            )
+        else:
+            reply = (
+                f"Commander, New Defense Platform **{asset_obj['id']} ({asset_obj['name']})** has been registered in the fleet registry! 🛡️\n\n"
+                f"• Classification: **{category}** ({atype})\n"
+                f"• Assigned Base: **{asset_obj['operationalBase']}**\n"
+                f"• Initial Status: **READY (94% Mission Readiness)**\n"
+                f"• Telemetry Baselines: Vibration **{base_vib} mm/s**, Pressure **{int(base_pres)} PSI**, Temp **{base_temp} °C**\n\n"
+                f"Live 2.0s IoT telemetry streaming is now active and the platform is visible across the mission control dashboard."
+            )
+
+        action_taken = {
+            "type": "ASSET_REGISTERED",
+            "title": f"New Platform Registered: {asset_obj['id']}",
+            "asset": asset_obj
+        }
+        return reply, action_taken, [asset_obj["id"]]
+
+    # TOOL: INJECT ANOMALY / SPIKE SENSOR
+    spike_triggers = ['spike', 'anomaly inject', 'vibration badhao', 'temp spike', 'pressure drop', 'kharab karo', 'critical banao', 'damage simulate']
+    if any(t in q for t in spike_triggers) and not any(w in q for w in ['khatam', 'reset', 'clear', 'hatao', 'theek']):
+        target = matched_assets[0] if matched_assets else next((a for a in all_assets if a["status"] == "ready"), all_assets[0])
+        sensor = "temp" if any(w in q for w in ['temp', 'temperature', 'garmi', 'heat']) else ("pressure" if any(w in q for w in ['pressure', 'hydraulic']) else "vibration")
+        spike_val = 5.45 if sensor == "vibration" else (2400.0 if sensor == "pressure" else 785.0)
+        
+        spike_res = manager.inject_anomaly(target["id"], sensor, spike_val, duration_seconds=60)
+        wo = spike_res.get("work_order", {})
+
+        try:
+            import asyncio
+            asyncio.create_task(manager.broadcast({
+                "type": "ANOMALY_TRIGGERED",
+                "asset_id": target["id"].upper(),
+                "sensor": sensor,
+                "spike_value": spike_val,
+                "interval_seconds": 2.0,
+                "timestamp": datetime.utcnow().strftime("%H:%M:%S"),
+                "assets": manager.fleet_state,
+                "metrics": manager.latest_metrics,
+                "work_order": wo,
+                "details": spike_res
+            }))
+        except Exception:
+            pass
+
+        if is_hinglish:
+            reply = (
+                f"Commander, **{target['id']} ({target['name']})** par **{sensor.upper()} Anomaly Spike ({spike_val})** inject kar diya gaya hai! 🚨\n\n"
+                f"• Status: **CRITICAL (Grounded)**\n"
+                f"• Telemetry Trip: Sensor value spiked to **{spike_val}**\n"
+                f"• Maintenance Plan: Emergency Work Order **{wo.get('id', 'WO-EMERGENCY')}** automatically create ho gaya hai\n"
+                f"• Fleet Dashboard: **Critical Non-Ready count (+1)** badh gaya hai\n\n"
+                f"Aap ise Maintenance Plan tab se Depot ko dispatch karke engineer sign-off le sakte hain."
+            )
+        else:
+            reply = (
+                f"Commander, critical {sensor.upper()} anomaly spike ({spike_val}) injected into **{target['id']} ({target['name']})**. 🚨\n\n"
+                f"• Operational Status: **CRITICAL (Flight/Sortie Blocked)**\n"
+                f"• Maintenance Plan: Emergency Work Order **{wo.get('id', 'WO-EMERGENCY')}** logged under Pending Dispatch\n"
+                f"• Fleet Metrics: **Critical Non-Ready metric (+1)** updated\n\n"
+                f"Platform requires immediate depot intervention via the Maintenance Schedule."
+            )
+
+        action_taken = {
+            "type": "ANOMALY_TRIGGERED",
+            "title": f"Anomaly Spike Injected: {target['id']}",
+            "asset": target,
+            "work_order": wo
+        }
+        return reply, action_taken, [target["id"]]
+
+    # TOOL: CONFIRM REPAIR / RESTORE NOMINAL
+    repair_triggers = ['confirm repair', 'repair confirm', 'theek karo', 'theek kardo', 'repair kardo', 'repair complete', 'nominal karo', 'normal karo', 'engineer sign', 'sign off']
+    if any(t in q for t in repair_triggers) and not any(w in q for w in ['dispatch', 'order bhej']):
+        target = matched_assets[0] if matched_assets else next((a for a in all_assets if a["status"] == "critical"), all_assets[0])
+        aid = target["id"].upper()
+        
+        manager.active_anomalies.pop(aid, None)
+        meta = manager.get_asset_meta(aid)
+        _repair_hold[aid] = time.time() + 15.0
+        if aid in manager.fleet_state:
+            curr = manager.fleet_state[aid]
+            curr["isSpike"] = False
+            curr["vibration"] = round(random.uniform(0.85, 1.35), 2)
+            base_pres = meta.get("base_pres", 3000.0)
+            curr["pressure"] = round(base_pres * random.uniform(0.98, 1.02), 0)
+            base_temp = meta.get("base_temp", 68.0 if curr.get("type") == "Ground Armor" else 660.0)
+            curr["temp"] = round(base_temp * 0.98, 1)
+            curr["status"] = "ready"
+            curr["readinessScore"] = random.randint(93, 98)
+            curr["failureProb"] = 0.06
+            curr["predictedRUL"] = random.randint(52, 75)
+            if curr.get("model_type") == "armor" or meta.get("model") == "armor":
+                curr["rpm"] = 1800
+                curr["torque"] = 48.0
+                curr["wear"] = 25
+                from api.routes_ws import INITIAL_FLEET_BASELINES
+                if aid in INITIAL_FLEET_BASELINES:
+                    INITIAL_FLEET_BASELINES[aid]["wear"] = 25
+                    INITIAL_FLEET_BASELINES[aid]["torque"] = 48.0
+                    INITIAL_FLEET_BASELINES[aid]["rpm"] = 1800
+
+        try:
+            conn = get_db_connection()
+            c = conn.cursor()
+            c.execute("UPDATE work_orders SET status = 'Repair Confirmed ✓' WHERE asset_id = ?", (aid,))
+            conn.commit()
+            conn.close()
+        except Exception:
+            pass
+
+        manager.update_tick()
+
+        try:
+            import asyncio
+            asyncio.create_task(manager.broadcast({
+                "type": "REPAIR_COMPLETE",
+                "asset_id": aid,
+                "asset_name": meta.get("name", aid),
+                "message": f"Engineer confirmed repair complete on {meta.get('name', aid)}.",
+                "timestamp": datetime.utcnow().strftime("%H:%M:%S"),
+                "assets": manager.fleet_state,
+                "metrics": manager.latest_metrics
+            }))
+        except Exception:
+            pass
+
+        if is_hinglish:
+            reply = (
+                f"Commander, **{target['id']} ({target['name']})** ka Depot Maintenance & Engineer Sign-Off COMPLETE ho gaya hai! ✅\n\n"
+                f"• Operational Status: **READY (Nominal Combat Health - {manager.fleet_state.get(aid, {}).get('readinessScore', 95)}%)**\n"
+                f"• Sensors Restored: Vibration **{manager.fleet_state.get(aid, {}).get('vibration', 1.10)} mm/s**, Pressure **{int(manager.fleet_state.get(aid, {}).get('pressure', 3000))} PSI**\n"
+                f"• Work Order Status: **Repair Confirmed ✓**\n"
+                f"• Fleet Dashboard: **Mission-Ready (Green Normal) count (+1)** badh gaya hai!\n\n"
+                f"Platform unrestricted sorties ke liye release kar diya gaya hai."
+            )
+        else:
+            reply = (
+                f"Commander, depot repair and engineer sign-off verified for **{target['id']} ({target['name']})**. ✅\n\n"
+                f"• Operational Status: **READY ({manager.fleet_state.get(aid, {}).get('readinessScore', 95)}% Mission Readiness)**\n"
+                f"• Telemetry Restored: Vibration **{manager.fleet_state.get(aid, {}).get('vibration', 1.10)} mm/s**, Pressure **{int(manager.fleet_state.get(aid, {}).get('pressure', 3000))} PSI**\n"
+                f"• Work Order: **Repair Confirmed ✓**\n"
+                f"• Fleet Dashboard: **Mission-Ready count (+1)** increased.\n\n"
+                f"Platform cleared for operational sortie deployment."
+            )
+
+        action_taken = {
+            "type": "REPAIR_CONFIRMED",
+            "title": f"Repair Confirmed: {target['id']}",
+            "asset": manager.fleet_state.get(aid, target)
+        }
+        return reply, action_taken, [target["id"]]
 
     # 1. TOOL 1: DISPATCH MAINTENANCE WORK ORDER TO SQLITE DATABASE
     dispatch_triggers = ['dispatch', 'work order', 'repair order', 'bhejo', 'order bhej', 'assign crew', 'fix karo', 'repair karo', 'maintenance order', 'order assign']
@@ -496,29 +753,42 @@ def execute_agentic_tool(user_query: str, matched_assets: List[Dict[str, Any]], 
         # Persist directly into SQLite database
         save_work_order(order_dict)
 
+        try:
+            import asyncio
+            try:
+                loop = asyncio.get_running_loop()
+                loop.create_task(manager.dispatch_asset(target["id"], order_id=order_id))
+            except RuntimeError:
+                asyncio.run(manager.dispatch_asset(target["id"], order_id=order_id))
+        except Exception as err:
+            print(f"[routes_chat] dispatch error: {err}")
+
         if is_hinglish:
             reply = (
-                f"Commander, **{target['id']} ({target['name']})** ke liye Work Order **{order_id}** turant Central Defense Depot ko DISPATCH kar diya gaya hai.\n\n"
+                f"Commander, **{target['id']} ({target['name']})** ke liye Work Order **{order_id}** turant Central Defense Depot ko DISPATCH kar diya gaya hai aur asset ko **NORMAL (Mission-Ready)** restore kar diya gaya hai! 🟢\n\n"
                 f"🛠️ **Task:** {task_desc}\n"
-                f"🚨 **Priority:** CRITICAL (Sortie Release Clearance Priority)\n"
+                f"🚨 **Status:** Dispatched to Depot & Normal Restored\n"
                 f"👷‍♂️ **Assigned Unit:** {crew}\n"
                 f"⏱️ **Due In:** 12 Hours (Estimated Downtime: 8 hrs)\n\n"
-                f"Ye order aapke **Maintenance Plan** me live add ho chuka hai aur depot ground technicians ko alert bheja ja chuka hai."
+                f"• **Fleet Dashboard:** Critical count (-1) kam ho gaya hai aur Mission-Ready (+1) badh gaya hai.\n"
+                f"• **Maintenance Plan:** Work Order dispatched list me record ho gaya hai."
             )
         else:
             reply = (
-                f"Commander, Work Order **{order_id}** has been officially DISPATCHED to the Central Defense Depot for **{target['id']} ({target['name']})**.\n\n"
+                f"Commander, Work Order **{order_id}** has been officially DISPATCHED to the Central Defense Depot for **{target['id']} ({target['name']})**, and the asset is restored to **NORMAL (Mission-Ready)**! 🟢\n\n"
                 f"🛠️ **Task:** {task_desc}\n"
-                f"🚨 **Priority:** CRITICAL\n"
+                f"🚨 **Status:** Dispatched to Depot (Operational)\n"
                 f"👷‍♂️ **Assigned Unit:** {crew}\n"
                 f"⏱️ **Due In:** 12 Hours (Estimated Downtime: 8 hrs)\n\n"
-                f"The work order is now registered in the persistent database and visible on the Maintenance Plan dashboard."
+                f"• **Fleet Dashboard:** Critical Non-Ready count decremented (-1), Mission-Ready count incremented (+1).\n"
+                f"• **Maintenance Plan:** Order updated to Dispatched status."
             )
 
         action_taken = {
             "type": "WORK_ORDER_DISPATCHED",
             "title": f"Work Order {order_id} Dispatched",
-            "order": order_dict
+            "order": order_dict,
+            "asset_id": target["id"]
         }
         return reply, action_taken, [target["id"]]
 
@@ -747,6 +1017,30 @@ def execute_agentic_tool(user_query: str, matched_assets: List[Dict[str, Any]], 
             "explanation": xai_info
         }
         return reply, action_taken, [target["id"]]
+
+    # 4. TOOL 4: FLEET FILTERING (CRITICAL / READY / WATCH)
+    is_crit_filter = any(w in q for w in ['critical', 'grounded', 'non ready', 'non-ready']) and any(w in q for w in ['dikhao', 'show', 'filter', 'list', 'only', 'assets', 'asset'])
+    if is_crit_filter:
+        reply = "Commander, Fleet filter applied: CRITICAL Non-Ready assets." if is_hinglish else "Commander, filtering fleet view to Critical Non-Ready platforms."
+        return reply, {"type": "FILTER_STATUS", "status": "CRITICAL"}, []
+
+    is_ready_filter = any(w in q for w in ['ready', 'operational', 'combat ready']) and any(w in q for w in ['dikhao', 'show', 'filter', 'list', 'only', 'assets', 'asset'])
+    if is_ready_filter:
+        reply = "Commander, Fleet filter applied: MISSION-READY platforms." if is_hinglish else "Commander, filtering fleet view to Mission-Ready platforms."
+        return reply, {"type": "FILTER_STATUS", "status": "READY"}, []
+
+    # 5. TOOL 5: NAVIGATION COMMANDS (Direct UI Page Switching)
+    if any(w in q for w in ['maintenance', 'schedule', 'sortie plan', 'plan table', 'work order table']) and any(w in q for w in ['open', 'show', 'dikhao', 'kholo', 'chalo', 'le chalo', 'go to', 'view', 'navigate']):
+        reply = "Commander, Maintenance & Sortie Schedule tab open kar diya gaya hai." if is_hinglish else "Commander, navigating to the Maintenance & Sortie Schedule."
+        return reply, {"type": "NAVIGATE", "tab": "maintenance"}, []
+
+    if any(w in q for w in ['fleet', 'platform', 'all assets', 'sab asset', 'assets']) and any(w in q for w in ['open', 'show', 'dikhao', 'kholo', 'chalo', 'le chalo', 'go to', 'view', 'navigate']):
+        reply = "Commander, Fleet Assets tab open kar diya gaya hai." if is_hinglish else "Commander, navigating to the Fleet Assets inventory."
+        return reply, {"type": "NAVIGATE", "tab": "assets"}, []
+
+    if any(w in q for w in ['dashboard', 'home', 'overview', 'main page']) and any(w in q for w in ['open', 'show', 'dikhao', 'kholo', 'chalo', 'le chalo', 'go to', 'view', 'navigate']):
+        reply = "Commander, Mission Readiness Dashboard open kar diya gaya hai." if is_hinglish else "Commander, navigating to the Mission Readiness Dashboard."
+        return reply, {"type": "NAVIGATE", "tab": "dashboard"}, []
 
     return None
 

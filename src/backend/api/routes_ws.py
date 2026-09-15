@@ -2,6 +2,7 @@ import asyncio
 import json
 import time
 import random
+import re
 from datetime import datetime
 from typing import List, Dict, Any, Optional, Tuple
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, HTTPException
@@ -9,6 +10,7 @@ from pydantic import BaseModel
 
 from ml.predictor import model_registry
 from ml.explainer import xai_explainer
+from database import get_all_custom_assets, save_work_order, get_db_connection
 
 router = APIRouter(tags=["telemetry_stream"])
 
@@ -16,7 +18,7 @@ class AnomalyInjectRequest(BaseModel):
     asset_id: str = "A-317"
     sensor: str = "vibration"
     spike_value: float = 5.45
-    duration_seconds: int = 45
+    duration_seconds: int = 300
 
 # Comprehensive Fleet Monitored Platforms Definitions (All 26 Defense Platforms)
 INITIAL_FLEET_BASELINES = {
@@ -64,8 +66,28 @@ class TelemetryEngine:
         self.active_connections: List[WebSocket] = []
         self.active_anomalies: Dict[str, Dict[str, Any]] = {}
         self.fleet_state: Dict[str, Dict[str, Any]] = {}
+        self.custom_baselines: Dict[str, Dict[str, Any]] = {}
         self.latest_metrics: Dict[str, Any] = {}
         self.init_fleet_state()
+
+    def get_asset_meta(self, aid: str) -> Dict[str, Any]:
+        aid_u = aid.upper()
+        if aid_u in INITIAL_FLEET_BASELINES:
+            return INITIAL_FLEET_BASELINES[aid_u]
+        if aid_u in self.custom_baselines:
+            return self.custom_baselines[aid_u]
+        curr = self.fleet_state.get(aid_u, {})
+        atype = curr.get("type", "Aircraft")
+        is_armor = any(k in atype.lower() for k in ["armor", "tank", "ugv", "howitzer"])
+        return {
+            "name": curr.get("name", aid_u),
+            "type": atype,
+            "category": curr.get("category", "Custom Fleet Platforms"),
+            "model": "armor" if is_armor else "bearing",
+            "base_vib": float(curr.get("vibration", 1.20)),
+            "base_pres": float(curr.get("pressure", 3000)),
+            "base_temp": float(curr.get("temp", 68.0 if is_armor else 660.0))
+        }
 
     def init_fleet_state(self):
         for aid, meta in INITIAL_FLEET_BASELINES.items():
@@ -88,6 +110,111 @@ class TelemetryEngine:
                 "isSpike": False,
                 "lastUpdated": datetime.utcnow().strftime("%H:%M:%S")
             }
+        self.load_custom_assets_from_db()
+        self.update_tick()
+
+    def load_custom_assets_from_db(self):
+        try:
+            custom_assets = get_all_custom_assets()
+            for ca in custom_assets:
+                aid = ca["id"].upper()
+                ctype = ca.get("type", "Aircraft")
+                is_armor = any(k in ctype.lower() for k in ["armor", "tank", "ugv", "howitzer"])
+                is_aircraft = ctype.lower() == "aircraft" or "aircraft" in str(ca.get("category", "")).lower()
+                model_type = "armor" if is_armor else ("turbofan" if ("turbofan" in str(ca.get("mlModelApplied", "")).lower() and is_aircraft) else "bearing")
+                
+                base_vib = 1.20
+                base_pres = 3000.0
+                base_temp = 68.0 if is_armor else 660.0
+                for s in ca.get("contributingSensors", []):
+                    sname = s.get("name", "").lower()
+                    if "vibration" in sname:
+                        nums = re.findall(r"[\d.]+", s.get("current", "1.20"))
+                        if nums: base_vib = float(nums[0])
+                    elif "pressure" in sname or "hydraulic" in sname:
+                        nums = re.findall(r"[\d.]+", s.get("current", "3000"))
+                        if nums: base_pres = float(nums[0])
+                    elif "temp" in sname or "thermal" in sname:
+                        nums = re.findall(r"[\d.]+", s.get("current", "660"))
+                        if nums: base_temp = float(nums[0])
+
+                self.custom_baselines[aid] = {
+                    "name": ca.get("name", aid),
+                    "type": ctype,
+                    "category": ca.get("category", "Custom Fleet Platforms"),
+                    "model": model_type,
+                    "base_vib": base_vib,
+                    "base_pres": base_pres,
+                    "base_temp": base_temp,
+                    "rpm": 1800,
+                    "torque": 50.0,
+                    "wear": 100
+                }
+                if aid not in self.fleet_state:
+                    self.fleet_state[aid] = {
+                        "id": aid,
+                        "name": ca.get("name", aid),
+                        "type": ctype,
+                        "category": ca.get("category", "Custom Fleet Platforms"),
+                        "model_type": model_type,
+                        "vibration": base_vib,
+                        "pressure": base_pres,
+                        "temp": base_temp,
+                        "rpm": 1800,
+                        "torque": 50.0,
+                        "wear": 100,
+                        "readinessScore": ca.get("readinessScore", 88),
+                        "predictedRUL": ca.get("predictedRUL", 45),
+                        "status": ca.get("status", "ready"),
+                        "failureProb": 0.12,
+                        "isSpike": False,
+                        "lastUpdated": datetime.utcnow().strftime("%H:%M:%S")
+                    }
+        except Exception as e:
+            print(f"[TelemetryEngine] load_custom_assets_from_db warning: {e}")
+
+    def register_custom_asset(self, asset_dict: Dict[str, Any]):
+        aid = asset_dict["id"].upper()
+        ctype = asset_dict.get("type", "Aircraft")
+        is_armor = any(k in ctype.lower() for k in ["armor", "tank", "ugv", "howitzer"])
+        is_aircraft = ctype.lower() == "aircraft" or "aircraft" in str(asset_dict.get("category", "")).lower()
+        model_type = "armor" if is_armor else ("turbofan" if ("turbofan" in str(asset_dict.get("mlModelApplied", "")).lower() and is_aircraft) else "bearing")
+        
+        base_vib = float(asset_dict.get("vibration", 1.20))
+        base_pres = float(asset_dict.get("pressure", 3000))
+        base_temp = float(asset_dict.get("temp", 68.0 if is_armor else 660.0))
+
+        self.custom_baselines[aid] = {
+            "name": asset_dict.get("name", aid),
+            "type": ctype,
+            "category": asset_dict.get("category", "Custom Fleet Platforms"),
+            "model": model_type,
+            "base_vib": base_vib,
+            "base_pres": base_pres,
+            "base_temp": base_temp,
+            "rpm": 1800,
+            "torque": 50.0,
+            "wear": 100
+        }
+        self.fleet_state[aid] = {
+            "id": aid,
+            "name": asset_dict.get("name", aid),
+            "type": ctype,
+            "category": asset_dict.get("category", "Custom Fleet Platforms"),
+            "model_type": model_type,
+            "vibration": base_vib,
+            "pressure": base_pres,
+            "temp": base_temp,
+            "rpm": 1800,
+            "torque": 50.0,
+            "wear": 100,
+            "readinessScore": asset_dict.get("readinessScore", 88),
+            "predictedRUL": asset_dict.get("predictedRUL", 45),
+            "status": asset_dict.get("status", "ready"),
+            "failureProb": 0.12,
+            "isSpike": False,
+            "lastUpdated": datetime.utcnow().strftime("%H:%M:%S")
+        }
         self.update_tick()
 
     async def connect(self, websocket: WebSocket):
@@ -122,10 +249,11 @@ class TelemetryEngine:
             "isSpike": False
         }
 
-    def inject_anomaly(self, asset_id: str, sensor: str, spike_value: float, duration_seconds: int = 45):
+    def inject_anomaly(self, asset_id: str, sensor: str, spike_value: float, duration_seconds: int = 300):
         aid = asset_id.upper()
         expires_at = time.time() + duration_seconds
-        name = INITIAL_FLEET_BASELINES.get(aid, {}).get("name", aid)
+        meta = self.get_asset_meta(aid)
+        name = meta.get("name", aid)
         self.active_anomalies[aid] = {
             "asset_id": aid,
             "asset_name": name,
@@ -135,39 +263,176 @@ class TelemetryEngine:
             "duration": duration_seconds,
             "injected_at": datetime.utcnow().isoformat()
         }
+        work_order = None
         if aid in self.fleet_state:
             self.fleet_state[aid][sensor] = spike_value
             self.fleet_state[aid]["isSpike"] = True
+            # Force critical status on spiked sensor
+            self.fleet_state[aid]["status"] = "critical"
+            self.fleet_state[aid]["readinessScore"] = min(int(self.fleet_state[aid].get("readinessScore", 85)), 32)
+            self.fleet_state[aid]["failureProb"] = 0.89
+            self.fleet_state[aid]["predictedRUL"] = max(2, int(self.fleet_state[aid].get("predictedRUL", 20) * 0.25))
             self.update_tick()
-        return self.active_anomalies[aid]
+
+            # Automatically create and persist an Emergency Work Order in the Maintenance Plan!
+            order_num = random.randint(100, 999)
+            order_id = f"WO-{aid}-{order_num}"
+            work_order = {
+                "id": order_id,
+                "assetId": aid,
+                "assetName": name,
+                "task": f"Emergency inspection: Critical {sensor} spike detected ({spike_value}) on {name}",
+                "priority": "critical",
+                "dueInHours": 8,
+                "assignedCrew": "Air Wing Depot Rapid Response Team Alpha",
+                "partsStatus": "In Stock (Depot)",
+                "status": "Pending Dispatch",
+                "estimatedDowntime": "8 hrs",
+                "impact": "Critical (Combat Sortie Blocked - Live Sensor Trip)"
+            }
+            try:
+                save_work_order(work_order)
+            except Exception as err:
+                print(f"[TelemetryEngine] Error saving spike work order: {err}")
+
+        res = dict(self.active_anomalies[aid])
+        if work_order:
+            res["work_order"] = work_order
+        return res
+
+    async def dispatch_asset(self, asset_id: str, order_id: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Dispatches maintenance action for asset:
+        1. Clears any active sensor anomaly spike.
+        2. Restores sensor values to safe nominal baselines.
+        3. Sets status='ready' (Normal / Mission-Ready), high readiness, low failure probability.
+        4. Sets 60s repair hold so dynamic IoT drift stays stable and does not re-trip.
+        5. Updates SQLite work order(s) to 'Dispatched to Depot'.
+        6. Recalculates fleet-wide metrics (Critical Non-Ready decrements -1, Mission Ready increments +1).
+        7. Broadcasts WORK_ORDER_DISPATCHED to all connected WebSocket clients.
+        """
+        aid = asset_id.upper()
+        if aid not in self.fleet_state:
+            self.load_custom_assets_from_db()
+            if aid not in self.fleet_state:
+                self.fleet_state[aid] = {
+                    "id": aid,
+                    "name": aid,
+                    "type": "Aircraft",
+                    "category": "Combat Aircraft",
+                    "model_type": "bearing",
+                    "status": "ready"
+                }
+
+        meta = self.get_asset_meta(aid)
+        curr = self.fleet_state[aid]
+
+        # 1. Clear any active anomaly
+        self.active_anomalies.pop(aid, None)
+        curr["isSpike"] = False
+
+        # 2. Set post-repair nominal sensor readings (safe zone)
+        repaired_vib = round(random.uniform(0.90, 1.35), 2)
+        base_pres = float(meta.get("base_pres", 3000.0))
+        repaired_pres = round(base_pres * random.uniform(0.99, 1.01), 0)
+        base_temp = float(meta.get("base_temp", 68.0 if "armor" in str(curr.get("type", "")).lower() else 660.0))
+        repaired_temp = round(base_temp * random.uniform(0.98, 1.01), 1)
+
+        curr["vibration"] = repaired_vib
+        curr["pressure"] = repaired_pres
+        curr["temp"] = repaired_temp
+        curr["status"] = "ready"
+        curr["readinessScore"] = random.randint(94, 98)
+        curr["failureProb"] = round(random.uniform(0.03, 0.08), 4)
+        curr["predictedRUL"] = random.randint(58, 76)
+        curr["lastUpdated"] = datetime.utcnow().strftime("%H:%M:%S")
+
+        if curr.get("model_type") == "armor" or meta.get("model") == "armor":
+            curr["rpm"] = meta.get("rpm", 1950)
+            curr["torque"] = meta.get("torque", 68.0)
+            curr["wear"] = meta.get("wear", 180)
+
+        # Update baselines so future micro-drift stays healthy
+        if aid in INITIAL_FLEET_BASELINES:
+            INITIAL_FLEET_BASELINES[aid]["base_vib"] = repaired_vib
+            INITIAL_FLEET_BASELINES[aid]["base_pres"] = repaired_pres
+            INITIAL_FLEET_BASELINES[aid]["base_temp"] = repaired_temp
+        if aid in self.custom_baselines:
+            self.custom_baselines[aid]["base_vib"] = repaired_vib
+            self.custom_baselines[aid]["base_pres"] = repaired_pres
+            self.custom_baselines[aid]["base_temp"] = repaired_temp
+
+        # 3. Hold nominal baseline for 60 seconds (drift won't trip)
+        _repair_hold[aid] = time.time() + 60.0
+
+        # 4. Update SQLite work orders
+        try:
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            if order_id:
+                cursor.execute("UPDATE work_orders SET status = 'Dispatched to Depot' WHERE id = ?", (order_id,))
+            cursor.execute("UPDATE work_orders SET status = 'Dispatched to Depot' WHERE asset_id = ? AND status = 'Pending Dispatch'", (aid,))
+            conn.commit()
+            conn.close()
+        except Exception as e:
+            print(f"[dispatch_asset] DB update error: {e}")
+
+        # 5. Recalculate fleet-wide metrics (Critical decreases -1, Mission-Ready increases +1)
+        self.update_tick()
+
+        # 6. Broadcast frame to all connected clients
+        await self.broadcast({
+            "type": "WORK_ORDER_DISPATCHED",
+            "asset_id": aid,
+            "order_id": order_id,
+            "message": f"Asset {meta.get('name', aid)} ({aid}) officially DISPATCHED to Depot. Status restored to NORMAL Mission-Ready.",
+            "timestamp": datetime.utcnow().strftime("%H:%M:%S"),
+            "assets": self.fleet_state,
+            "metrics": self.latest_metrics
+        })
+
+        return {
+            "status": "success",
+            "asset_id": aid,
+            "order_id": order_id,
+            "new_status": "ready",
+            "message": f"Asset {aid} dispatched and restored to normal mission-ready.",
+            "metrics": self.latest_metrics
+        }
 
     def reset_anomaly(self, asset_id: Optional[str] = None):
         if asset_id:
             aid = asset_id.upper()
             self.active_anomalies.pop(aid, None)
-            if aid in self.fleet_state and aid in INITIAL_FLEET_BASELINES:
+            meta = self.get_asset_meta(aid)
+            if aid in self.fleet_state:
                 self.fleet_state[aid]["isSpike"] = False
-                self.fleet_state[aid]["vibration"] = INITIAL_FLEET_BASELINES[aid]["base_vib"]
-                self.fleet_state[aid]["pressure"] = INITIAL_FLEET_BASELINES[aid]["base_pres"]
-                self.fleet_state[aid]["temp"] = INITIAL_FLEET_BASELINES[aid]["base_temp"]
+                self.fleet_state[aid]["vibration"] = meta["base_vib"]
+                self.fleet_state[aid]["pressure"] = meta["base_pres"]
+                self.fleet_state[aid]["temp"] = meta["base_temp"]
+                self.fleet_state[aid]["status"] = "ready"
+                self.fleet_state[aid]["readinessScore"] = 92
         else:
             self.active_anomalies.clear()
-            for aid, meta in INITIAL_FLEET_BASELINES.items():
-                if aid in self.fleet_state:
-                    self.fleet_state[aid]["isSpike"] = False
-                    self.fleet_state[aid]["vibration"] = meta["base_vib"]
-                    self.fleet_state[aid]["pressure"] = meta["base_pres"]
-                    self.fleet_state[aid]["temp"] = meta["base_temp"]
+            for aid in list(self.fleet_state.keys()):
+                meta = self.get_asset_meta(aid)
+                self.fleet_state[aid]["isSpike"] = False
+                self.fleet_state[aid]["vibration"] = meta["base_vib"]
+                self.fleet_state[aid]["pressure"] = meta["base_pres"]
+                self.fleet_state[aid]["temp"] = meta["base_temp"]
+                self.fleet_state[aid]["status"] = "ready"
+                self.fleet_state[aid]["readinessScore"] = 92
         self.update_tick()
 
     def update_tick(self) -> Tuple[Dict[str, Any], List[Dict[str, Any]]]:
         """
-        Runs live IoT sensor drift, genuine ML predictions, and authentic XAI attributions on every 1.25s tick.
+        Runs live IoT sensor drift, genuine ML predictions, and authentic XAI attributions on every tick across ALL fleet assets.
         """
         now = time.time()
         anomaly_alerts = []
 
-        for aid, meta in INITIAL_FLEET_BASELINES.items():
+        for aid in list(self.fleet_state.keys()):
+            meta = self.get_asset_meta(aid)
             curr = self.fleet_state[aid]
             active_anom = self.active_anomalies.get(aid)
             is_spiked = False
@@ -194,70 +459,69 @@ class TelemetryEngine:
             # Post-repair hold: suppress drift for 10-13s after engineer confirmation
             in_repair_hold = aid in _repair_hold and now < _repair_hold[aid]
             if in_repair_hold and not is_spiked:
-                # Keep values frozen at nominal during hold window; clean up when expired
                 curr["isSpike"] = False
                 pass  # Skip all drift this tick
             elif aid in _repair_hold and now >= _repair_hold[aid]:
-                # Hold expired — remove and let drift resume naturally
                 del _repair_hold[aid]
 
             # Natural dynamic sensor micro-drift
             if not is_spiked and not in_repair_hold:
-                # Vibration drift with authentic momentum
                 vib_drift = random.uniform(-0.075, 0.075)
                 new_vib = round(max(0.4, curr["vibration"] + vib_drift), 2)
                 if abs(new_vib - meta["base_vib"]) > 0.55:
                     new_vib = round(meta["base_vib"] + random.uniform(-0.15, 0.15), 2)
                 curr["vibration"] = new_vib
 
-                # Pressure drift
                 pres_drift = random.uniform(-16.0, 16.0)
                 new_pres = round(curr["pressure"] + pres_drift, 0)
                 if abs(new_pres - meta["base_pres"]) > 85:
                     new_pres = round(meta["base_pres"] + random.uniform(-25, 25), 0)
                 curr["pressure"] = new_pres
 
-                # Temperature drift
                 temp_drift = random.uniform(-1.8, 1.8)
                 new_temp = round(curr["temp"] + temp_drift, 1)
                 if abs(new_temp - meta["base_temp"]) > 16:
                     new_temp = round(meta["base_temp"] + random.uniform(-3, 3), 1)
                 curr["temp"] = new_temp
 
-                # Mechanical params for ground vehicles
-                if meta["model"] == "armor":
+                if meta.get("model") == "armor":
                     rpm_drift = random.uniform(-15, 15)
-                    curr["rpm"] = round(max(1000, curr["rpm"] + rpm_drift), 0)
+                    curr["rpm"] = round(max(1000, curr.get("rpm", 1800) + rpm_drift), 0)
                     torq_drift = random.uniform(-0.5, 0.5)
-                    curr["torque"] = round(max(30.0, curr["torque"] + torq_drift), 1)
-                    curr["wear"] = round(min(260.0, curr["wear"] + 0.02), 2)
+                    curr["torque"] = round(max(30.0, curr.get("torque", 50.0) + torq_drift), 1)
+                    curr["wear"] = round(min(260.0, curr.get("wear", 100) + 0.02), 2)
 
             # Authentic ML Prediction for each platform model type
-            m_type = meta["model"]
-            if m_type == "bearing":
-                res = model_registry.predict_bearing(rms_vibration=curr["vibration"])
-                fail_prob = res["failure_prob"]
-                base_rul_span = 45
-            elif m_type == "armor":
-                res = model_registry.predict_ground_armor(
-                    air_temp_k=300.0,
-                    process_temp_k=curr["temp"] if curr["temp"] > 250 else curr["temp"] + 273.15,
-                    speed_rpm=curr.get("rpm", 1800),
-                    torque_nm=curr.get("torque", 50),
-                    tool_wear_min=curr.get("wear", 100)
-                )
-                fail_prob = res["failure_prob"]
-                base_rul_span = 55
+            if is_spiked:
+                fail_prob = 0.89
+                base_rul_span = 12
+            elif in_repair_hold:
+                fail_prob = round(random.uniform(0.04, 0.09), 4)
+                base_rul_span = 60
             else:
-                # Turbofan thermodynamic cycle
-                hpc_ratio = round(1.45 * (curr["pressure"] / 3000.0), 2)
-                fail_prob = min(0.95, max(0.04, 0.04 + max(0.0, (curr["temp"] - 680.0)/110.0 * 0.42) + max(0.0, (1.45 - hpc_ratio) * 1.8 * 0.38) + max(0.0, (curr["vibration"] - 1.2)/1.6 * 0.3)))
-                base_rul_span = 65
+                m_type = meta.get("model", "bearing")
+                if m_type == "bearing":
+                    res = model_registry.predict_bearing(rms_vibration=curr["vibration"])
+                    fail_prob = res["failure_prob"]
+                    base_rul_span = 45
+                elif m_type == "armor":
+                    res = model_registry.predict_ground_armor(
+                        air_temp_k=300.0,
+                        process_temp_k=curr["temp"] if curr["temp"] > 250 else curr["temp"] + 273.15,
+                        speed_rpm=curr.get("rpm", 1800),
+                        torque_nm=curr.get("torque", 50),
+                        tool_wear_min=curr.get("wear", 100)
+                    )
+                    fail_prob = res["failure_prob"]
+                    base_rul_span = 55
+                else:
+                    hpc_ratio = round(1.45 * (curr["pressure"] / 3000.0), 2)
+                    fail_prob = min(0.95, max(0.04, 0.04 + max(0.0, (curr["temp"] - 680.0)/110.0 * 0.42) + max(0.0, (1.45 - hpc_ratio) * 1.8 * 0.38) + max(0.0, (curr["vibration"] - 1.2)/1.6 * 0.3)))
+                    base_rul_span = 65
 
-            # Dynamic readiness and RUL
             readiness = max(12, min(99, int((1.0 - fail_prob) * 100)))
             rul = max(2, int((1.0 - fail_prob) * base_rul_span))
-            status = "critical" if fail_prob >= 0.58 else ("watch" if fail_prob >= 0.28 else "ready")
+            status = "critical" if (fail_prob >= 0.58 or is_spiked) else ("watch" if fail_prob >= 0.28 else "ready")
 
             curr["failureProb"] = round(fail_prob, 4)
             curr["readinessScore"] = readiness
@@ -265,13 +529,12 @@ class TelemetryEngine:
             curr["status"] = status
             curr["lastUpdated"] = datetime.utcnow().strftime("%H:%M:%S")
 
-            # Compute real-time counterfactual XAI attributions for this platform
             try:
                 curr["xaiAttribution"] = xai_explainer.explain_asset(curr)
-            except Exception as xerr:
+            except Exception:
                 pass
 
-        # Calculate fleet-wide metrics and category breakdown dynamically
+        # Dynamic fleet metrics
         assets_list = list(self.fleet_state.values())
         crit_count = sum(1 for a in assets_list if a["status"] == "critical")
         watch_count = sum(1 for a in assets_list if a["status"] == "watch")
@@ -279,8 +542,7 @@ class TelemetryEngine:
         total = len(assets_list)
         ready_pct = round((ready_count / max(1, total)) * 100, 1)
 
-        # Dynamic Combat Branch Readiness Breakdown
-        categories = ["Combat Aircraft", "Ground Armored Fleet", "Naval Strike Group", "Air & Missile Defense"]
+        categories = ["Combat Aircraft", "Ground Armored Fleet", "Naval Strike Group", "Air & Missile Defense", "Custom Fleet Platforms"]
         readiness_by_cat = []
         for cat in categories:
             cat_assets = [a for a in assets_list if a.get("category") == cat]
@@ -376,6 +638,7 @@ async def websocket_telemetry_endpoint(websocket: WebSocket):
 async def inject_anomaly_endpoint(req: AnomalyInjectRequest):
     """
     Triggers dynamic anomaly injection (e.g. vibration spike) on a combat asset.
+    Immediately creates a maintenance work order and broadcasts updated critical metrics to all clients.
     """
     data = manager.inject_anomaly(
         asset_id=req.asset_id,
@@ -383,15 +646,36 @@ async def inject_anomaly_endpoint(req: AnomalyInjectRequest):
         spike_value=req.spike_value,
         duration_seconds=req.duration_seconds
     )
+    # Broadcast immediate full tick so Dashboard Critical number and Maintenance Plan update immediately!
+    await manager.broadcast({
+        "type": "ANOMALY_TRIGGERED",
+        "asset_id": req.asset_id.upper(),
+        "sensor": req.sensor,
+        "spike_value": req.spike_value,
+        "interval_seconds": 2.0,
+        "timestamp": datetime.utcnow().strftime("%H:%M:%S"),
+        "assets": manager.fleet_state,
+        "metrics": manager.latest_metrics,
+        "work_order": data.get("work_order"),
+        "details": data
+    })
     return {
         "status": "success",
-        "message": f"Live Anomaly injected into {req.asset_id.upper()} [{req.sensor} = {req.spike_value}]",
+        "message": f"Live Anomaly injected into {req.asset_id.upper()} [{req.sensor} = {req.spike_value}]. Work order created.",
+        "work_order": data.get("work_order"),
         "details": data
     }
 
 @router.post("/api/telemetry/reset-anomaly")
 async def reset_anomaly_endpoint(asset_id: Optional[str] = None):
     manager.reset_anomaly(asset_id)
+    await manager.broadcast({
+        "type": "TELEMETRY_FULL_TICK",
+        "interval_seconds": 2.0,
+        "timestamp": datetime.utcnow().strftime("%H:%M:%S"),
+        "assets": manager.fleet_state,
+        "metrics": manager.latest_metrics
+    })
     return {"status": "success", "message": "Telemetry anomaly cleared and nominal baselines restored"}
 
 
@@ -399,16 +683,20 @@ async def reset_anomaly_endpoint(asset_id: Optional[str] = None):
 async def complete_repair_endpoint(asset_id: str):
     """
     Engineer confirms repair complete.
-    1) Immediately resets asset to safe, nominal post-repair sensor values.
-    2) For 10-13 seconds the asset stays stable at nominal.
-    3) After that, the normal 2.0s random drift engine resumes from new low baseline,
-       so status (critical / watch / ready) evolves naturally from fresh start.
+    1) Resets asset to nominal post-repair sensor values and status='ready'.
+    2) Updates SQLite work order status to 'Repair Confirmed ✓'.
+    3) Recalculates fleet-wide metrics (+1 Ready green count, -1 Critical count).
+    4) Enters 10-13s repair hold window.
+    5) Broadcasts updated fleet state and metrics to all connected clients.
     """
     aid = asset_id.upper()
     if aid not in manager.fleet_state:
-        raise HTTPException(status_code=404, detail=f"Asset {aid} not found")
+        # Check if it exists in DB as custom asset
+        manager.load_custom_assets_from_db()
+        if aid not in manager.fleet_state:
+            raise HTTPException(status_code=404, detail=f"Asset {aid} not found")
 
-    meta = INITIAL_FLEET_BASELINES.get(aid, {})
+    meta = manager.get_asset_meta(aid)
     curr = manager.fleet_state[aid]
 
     # --- Clear any active anomaly injection ---
@@ -416,37 +704,61 @@ async def complete_repair_endpoint(asset_id: str):
     curr["isSpike"] = False
 
     # --- Set post-repair nominal values (safe range, well below MIL-SPEC thresholds) ---
-    repaired_vib  = round(random.uniform(1.10, 2.10), 2)   # Well below 3.50 mm/s threshold
-    repaired_pres = round(random.uniform(2930, 3060), 0)    # Healthy pressure
-    base_temp     = meta.get("base_temp", 680)
-    repaired_temp = round(random.uniform(base_temp * 0.91, base_temp * 0.96), 1)
+    repaired_vib = round(random.uniform(0.85, 1.45), 2)   # Nominal vibration
+    base_pres = meta.get("base_pres", 3000.0)
+    repaired_pres = round(base_pres * random.uniform(0.98, 1.02), 0)   # Optimal hydraulic pressure
+    base_temp = meta.get("base_temp", 68.0 if curr.get("type") == "Ground Armor" else 660.0)
+    repaired_temp = round(base_temp * random.uniform(0.96, 1.02), 1)
 
     curr["vibration"] = repaired_vib
-    curr["pressure"]  = repaired_pres
-    curr["temp"]      = repaired_temp
-    curr["readinessScore"] = random.randint(78, 96)
-    curr["status"]    = "ready"
-    curr["failureProb"] = round(random.uniform(0.04, 0.18), 4)
-    curr["predictedRUL"] = random.randint(38, 65)
+    curr["pressure"] = repaired_pres
+    curr["temp"] = repaired_temp
+    curr["readinessScore"] = random.randint(92, 98)
+    curr["status"] = "ready"
+    curr["failureProb"] = round(random.uniform(0.04, 0.10), 4)
+    curr["predictedRUL"] = random.randint(55, 75)
 
-    # --- Temporarily rebase the drift engine to the repaired values ---
-    # The drift loop will now drift from these new lows, not the original worn baselines.
-    INITIAL_FLEET_BASELINES[aid]["base_vib"]  = repaired_vib
-    INITIAL_FLEET_BASELINES[aid]["base_pres"] = repaired_pres
-    INITIAL_FLEET_BASELINES[aid]["base_temp"] = repaired_temp
+    if curr.get("model_type") == "armor" or meta.get("model") == "armor":
+        curr["rpm"] = meta.get("rpm", 1950)
+        curr["torque"] = meta.get("torque", 68.0)
+        curr["wear"] = meta.get("wear", 180)
+
+    # --- Update baselines so drift begins from fresh nominal baseline ---
+    if aid in INITIAL_FLEET_BASELINES:
+        INITIAL_FLEET_BASELINES[aid]["base_vib"] = repaired_vib
+        INITIAL_FLEET_BASELINES[aid]["base_pres"] = repaired_pres
+        INITIAL_FLEET_BASELINES[aid]["base_temp"] = repaired_temp
+    if aid in manager.custom_baselines:
+        manager.custom_baselines[aid]["base_vib"] = repaired_vib
+        manager.custom_baselines[aid]["base_pres"] = repaired_pres
+        manager.custom_baselines[aid]["base_temp"] = repaired_temp
 
     # Mark repair hold window (10-13 seconds) so drift engine holds stable
     hold_secs = random.uniform(10, 13)
     _repair_hold[aid] = time.time() + hold_secs
 
-    # Broadcast the immediate nominal reset to all connected clients
+    # --- Update work orders in SQLite DB for this asset ---
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("UPDATE work_orders SET status = 'Repair Confirmed ✓' WHERE asset_id = ?", (aid,))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"[complete_repair] DB update error: {e}")
+
+    # --- Recalculate fleet-wide metrics (Green Mission Ready count increases!) ---
+    manager.update_tick()
+
+    # Broadcast the immediate nominal reset and updated metrics to all connected clients
     await manager.broadcast({
         "type": "REPAIR_COMPLETE",
         "asset_id": aid,
         "asset_name": meta.get("name", aid),
-        "message": f"Engineer confirmed repair complete on {meta.get('name', aid)}. Asset restored to nominal. Drift resumes in ~{int(hold_secs)}s.",
+        "message": f"Engineer confirmed repair complete on {meta.get('name', aid)}. Asset restored to NOMINAL. Live drift resumes in ~{int(hold_secs)}s.",
         "timestamp": datetime.utcnow().strftime("%H:%M:%S"),
-        "assets": {aid: curr}
+        "assets": manager.fleet_state,
+        "metrics": manager.latest_metrics
     })
 
     return {
@@ -457,8 +769,21 @@ async def complete_repair_endpoint(asset_id: str):
             "vibration": repaired_vib,
             "pressure": repaired_pres,
             "temp": repaired_temp
-        }
+        },
+        "metrics": manager.latest_metrics
     }
+
+
+@router.post("/api/telemetry/dispatch-asset/{asset_id}")
+async def dispatch_asset_telemetry_endpoint(asset_id: str, order_id: Optional[str] = None):
+    """
+    Directly dispatches an asset to depot:
+    Restores asset to nominal (status='ready', high readiness, low failure probability).
+    Decrements Critical Non-Ready count, increments Mission Ready count.
+    Broadcasts WORK_ORDER_DISPATCHED to all connected clients.
+    """
+    res = await manager.dispatch_asset(asset_id, order_id=order_id)
+    return res
 
 
 @router.get("/api/telemetry/status")

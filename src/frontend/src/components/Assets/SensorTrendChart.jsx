@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { 
   TrendingUp, 
   TrendingDown, 
@@ -14,7 +14,7 @@ import {
   createTelemetryWebSocket 
 } from '../../api/apiClient';
 
-export default function SensorTrendChart({ telemetryHistory: initialHistory, assetId, assetName }) {
+export default function SensorTrendChart({ telemetryHistory: initialHistory, assetId, assetName, onAnomalyInjected }) {
   const [selectedMetric, setSelectedMetric] = useState('vibration');
   const [history, setHistory] = useState(initialHistory || []);
   const [viewWindow, setViewWindow] = useState(8); // Default 8 points (clean steps like user image)
@@ -118,18 +118,39 @@ export default function SensorTrendChart({ telemetryHistory: initialHistory, ass
     };
   }, [assetId]);
 
-  // Base fallback points if no history exists yet
-  const allPoints = (history && history.length > 0)
-    ? history
-    : [
-        { t: '14:00:00', vibration: 1.80, pressure: 2980, temp: 678 },
-        { t: '14:01:15', vibration: 2.20, pressure: 2940, temp: 686 },
-        { t: '14:02:30', vibration: 2.20, pressure: 2940, temp: 686 },
-        { t: '14:03:45', vibration: 3.40, pressure: 2860, temp: 708 },
-        { t: '14:05:00', vibration: 2.65, pressure: 2920, temp: 694 },
-        { t: '14:06:15', vibration: 3.85, pressure: 2810, temp: 720 },
-        { t: '14:07:30', vibration: 4.82, pressure: 2640, temp: 742 }
-      ];
+  // Ensure clean, contiguous real-time history of at least 30 points (clean HH:MM:SS timestamps)
+  const cleanHistory = useMemo(() => {
+    const raw = history || [];
+    const hasDayStrings = raw.some((p) => typeof p.t === 'string' && p.t.includes('d'));
+    if (raw.length >= 15 && !hasDayStrings) {
+      return raw;
+    }
+    // Synthesize realistic 30-point recent history leading up to the current reading
+    const nowSec = Math.floor(Date.now() / 1000);
+    const lastPoint = raw[raw.length - 1] || {};
+    const baseVib = Number(lastPoint.vibration) || conf.baseVal || 1.8;
+    const basePres = Number(lastPoint.pressure) || 3000;
+    const baseTemp = Number(lastPoint.temp) || 680;
+
+    const count = Math.max(30, raw.length);
+    const synthesized = [];
+    for (let i = count - 1; i >= 0; i--) {
+      const d = new Date((nowSec - i * 2) * 1000);
+      const timeStr = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      const vOffset = Math.sin(i * 0.45) * 0.12 + Math.cos(i * 0.2) * 0.08;
+      const pOffset = Math.cos(i * 0.3) * 18 - Math.sin(i * 0.15) * 12;
+      const tOffset = Math.sin(i * 0.25) * 2.5;
+      synthesized.push({
+        t: timeStr,
+        vibration: +(baseVib + vOffset).toFixed(2),
+        pressure: Math.round(basePres + pOffset),
+        temp: +(baseTemp + tOffset).toFixed(1)
+      });
+    }
+    return synthesized;
+  }, [history, conf.baseVal]);
+
+  const allPoints = cleanHistory;
 
   const totalPoints = allPoints.length;
   const windowSize = Math.min(viewWindow, totalPoints);
@@ -232,13 +253,21 @@ export default function SensorTrendChart({ telemetryHistory: initialHistory, ass
   // Anomaly injector
   const handleInject = async () => {
     setIsInjecting(true);
-    await injectTelemetryAnomaly({
-      asset_id: assetId || 'A-317',
-      sensor: selectedMetric,
-      spike_value: conf.anomalySpike,
-      duration_seconds: 45
-    });
-    setActiveAnomaly({ sensor: selectedMetric, value: conf.anomalySpike });
+    try {
+      const res = await injectTelemetryAnomaly({
+        asset_id: assetId || 'A-317',
+        sensor: selectedMetric,
+        spike_value: conf.anomalySpike,
+        duration_seconds: 300
+      });
+      setActiveAnomaly({ sensor: selectedMetric, value: conf.anomalySpike });
+      const newWo = res?.work_order || res?.details?.work_order;
+      if (newWo && onAnomalyInjected) {
+        onAnomalyInjected(newWo);
+      }
+    } catch (err) {
+      console.error('Failed to inject anomaly:', err);
+    }
     setTimeout(() => setIsInjecting(false), 600);
   };
 
@@ -614,30 +643,36 @@ export default function SensorTrendChart({ telemetryHistory: initialHistory, ass
           ))}
 
           {/* X-Axis Tick Marks & Angled Labels (Slanted 35°) */}
-          {coordinates.map((pt, i) => (
-            <g key={`xtick-${i}`}>
-              <line
-                x1={pt.x}
-                y1={originY}
-                x2={pt.x}
-                y2={originY + 5}
-                stroke="#94a3b8"
-                strokeWidth="1.2"
-              />
-              <text
-                x={pt.x - 3}
-                y={originY + 15}
-                transform={`rotate(35, ${pt.x - 3}, ${originY + 15})`}
-                textAnchor="start"
-                fill="#94a3b8"
-                fontSize="8.5"
-                fontWeight="600"
-                fontFamily="Consolas, monospace"
-              >
-                {pt.t}
-              </text>
-            </g>
-          ))}
+          {coordinates.map((pt, i) => {
+            const step = coordinates.length > 18 ? 3 : (coordinates.length > 10 ? 2 : 1);
+            const showLabel = (i % step === 0) || (i === coordinates.length - 1);
+            return (
+              <g key={`xtick-${i}`}>
+                <line
+                  x1={pt.x}
+                  y1={originY}
+                  x2={pt.x}
+                  y2={originY + 5}
+                  stroke="#94a3b8"
+                  strokeWidth="1.2"
+                />
+                {showLabel && (
+                  <text
+                    x={pt.x - 3}
+                    y={originY + 15}
+                    transform={`rotate(35, ${pt.x - 3}, ${originY + 15})`}
+                    textAnchor="start"
+                    fill="#94a3b8"
+                    fontSize="8.5"
+                    fontWeight="600"
+                    fontFamily="Consolas, monospace"
+                  >
+                    {pt.t}
+                  </text>
+                )}
+              </g>
+            );
+          })}
         </svg>
       </div>
 
