@@ -1,7 +1,7 @@
 # Solution Overview
 
 ## What We Built
-
+ 
 We built the **Mission Readiness & Predictive Maintenance Copilot (AEGIS Defense Platform)** — an end-to-end AI-powered defense command and engineering intelligence system designed to ensure maximum combat readiness and zero unpredicted mission failures across multi-domain military fleets.
 
 The platform continuously monitors telemetry from combat aircraft, armored ground vehicles, rotary wings, and naval platforms, applying **three domain-specialized Machine Learning models** to calculate asset readiness scores and predict Remaining Useful Life (RUL) in days. 
