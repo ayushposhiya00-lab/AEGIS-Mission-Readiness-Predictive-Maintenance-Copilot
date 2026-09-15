@@ -1,7 +1,6 @@
-# 🚀 Mission Readiness & Predictive Maintenance
-Copilot
+# 🚀 Mission Readiness & Predictive Maintenance Copilot
 
-> ⚠️ **Replace everything in `[ ]` brackets with your actual content before submission.**
+> An AI-powered platform for mission readiness assessment, predictive maintenance, failure prediction, and Remaining Useful Life (RUL) estimation for critical assets.
 
 ---
 
@@ -12,32 +11,38 @@ Copilot
 | **Team Name** | TeamX |
 | **Track** | AI |
 | **Team Lead** | Ayush — 25dce092@charusat.edu.in |
-| **Members** | Yaksh , Krish , Het |
+| **Members** | Yaksh, Krish, Het |
 
 ---
 
 ## 🎯 Problem Statement
 
-> In 2–3 sentences: What problem does your project solve? Who experiences this problem?
+Military organisations struggle to determine whether aircraft, vehicles, and other critical equipment are truly mission-ready because maintenance is often based on fixed schedules rather than actual equipment condition. Maintenance teams and military operators may face unexpected equipment failures because valuable HUMS sensor data and service records are not effectively analysed to identify early signs of component degradation.
 
-Military organisations struggle to determine whether aircraft, vehicles, and other equipment are truly mission-ready because maintenance is often based on fixed schedules rather than actual equipment condition. Maintenance teams and military operators face unexpected equipment failures because valuable HUMS sensor data and service records are not effectively analysed to predict component failures in advance. Our project helps identify non-ready assets, predict potential failures, explain readiness issues, and prioritise maintenance before the next mission.
-
+Our project helps identify non-ready assets, predict potential failures, explain the factors affecting asset health, estimate Remaining Useful Life (RUL), and prioritise maintenance before the next mission.
 
 ---
 
 ## 💡 Solution
 
-> In 2–3 sentences: What did you build? How does it solve the problem above?
+We built an **AI-powered Mission Readiness & Predictive Maintenance Copilot** that analyses equipment telemetry using trained machine learning models to predict failure risk, operational readiness, and Remaining Useful Life (RUL) for supported aircraft, ground-vehicle, and bearing-related assets.
 
-[We built an AI-powered Mission Readiness & Predictive Maintenance Copilot that analyzes equipment telemetry using trained ML models to predict failure risk, operational readiness, and remaining useful life (RUL) for aircraft, ground vehicles, and bearings. The system combines these predictions with explainable sensor-level analysis and an AI copilot to identify the main causes of risk, prioritize maintenance, and help maintenance teams make faster, data-driven decisions before a mission.]
+The system combines ML predictions with explainable sensor-level diagnostics and an AI copilot to identify the main causes of risk, prioritise maintenance actions, and help maintenance teams make faster, data-driven decisions before a mission.
+
+---
 
 ## ✨ Key Features
 
-- **Real-Time Fleet Monitoring:** Continuously monitors aircraft, ground vehicles, and bearing assets using telemetry data and provides live asset status, health, alerts, and mission-readiness information.
-- **ML-Based Failure Prediction:** Uses trained machine learning models to predict the probability of equipment failure from sensor and operational data.
-- **Remaining Useful Life (RUL) Prediction:** Estimates how much useful operational life remains for supported assets, helping maintenance teams plan interventions before critical failure.
-- **Explainable AI Diagnostics:** Explains why an asset is considered high-risk by analyzing sensor values, deviations from baseline conditions, severity, and their contribution to the predicted risk.
-- **Predictive Maintenance Planning:** Converts high-risk predictions into prioritized maintenance actions, including repair tasks, urgency, crew assignment, spare-parts status, and mission impact.
+- **Real-Time Fleet Monitoring:** Continuously monitors supported assets using telemetry data and provides live asset health, status, alerts, and mission-readiness information.
+
+- **ML-Based Failure Prediction:** Uses trained machine learning models to estimate the probability of equipment failure from sensor and operational data.
+
+- **Remaining Useful Life (RUL) Prediction:** Estimates the remaining useful operational life of supported assets to help maintenance teams plan interventions before critical degradation.
+
+- **Explainable AI Diagnostics:** Analyses sensor values, operating conditions, deviations from baseline behaviour, and severity to explain the major factors contributing to an asset's predicted risk.
+
+- **Predictive Maintenance Planning:** Converts high-risk predictions into prioritised maintenance actions based on asset condition, urgency, and mission impact.
+
 - **AI Mission Readiness Copilot:** Provides natural-language assistance for understanding fleet health, asset risks, diagnostics, readiness, and recommended maintenance actions.
 
 ---
@@ -48,15 +53,31 @@ Military organisations struggle to determine whether aircraft, vehicles, and oth
 |---|---|
 | **Languages** | Python, JavaScript (JSX) |
 | **Frameworks** | React 19, Vite, FastAPI |
-| **IBM Technologies** | IBM Bob - For Debugging And Code Review |
+| **Machine Learning** | scikit-learn, NumPy, pandas, Joblib |
+| **IBM Technologies** | IBM Bob – used for development, debugging, and code review |
 | **Databases** | SQLite |
-| **Other** | scikit-learn, NumPy, pandas, Joblib, WebSockets, Lucide React |
+| **Real-Time Communication** | WebSockets |
+| **UI / Icons** | Lucide React |
+
+---
+
+## 🤖 Machine Learning Models
+
+The platform integrates trained machine learning models for different types of equipment and telemetry:
+
+| Dataset / Model | Purpose |
+|---|---|
+| **AI4I 2020 Predictive Maintenance** | Mechanical failure prediction |
+| **IMS Bearing Dataset** | Bearing health, vibration analysis, and failure prediction |
+| **N-CMAPSS Turbofan Dataset** | Turbofan engine degradation and RUL prediction |
+
+The trained models are stored as serialized model files and loaded by the backend for inference on compatible telemetry data.
 
 ---
 
 ## 📁 Repository Structure
 
-```
+```text
 ├── src/
 │   ├── frontend/
 │   │   └── src/
@@ -84,11 +105,20 @@ Military organisations struggle to determine whether aircraft, vehicles, and oth
 │   └── project architecture
 │
 ├── docs/
+│   ├── problem-statement.md
+│   ├── solution-overview.md
+│   ├── architecture.md
+│   └── setup-guide.md
+│
 ├── demo/
+│   ├── screenshots/
+│   ├── demo-video-link.txt
+│   └── live-demo-url.txt
+│
 ├── presentation/
+│   └── slides.pdf
+│
 └── submission.yaml
-
----
 
 ## ⚡ How to Run
 
