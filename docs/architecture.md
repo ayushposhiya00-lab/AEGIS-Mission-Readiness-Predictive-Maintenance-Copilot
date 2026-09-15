@@ -1,4 +1,4 @@
-# Architecture — Mission Readiness & Predictive Maintenance Copilot
+# Architecture — Mission Readiness & Predictive Maintenance Copilot 
 
 ## System Architecture
 
