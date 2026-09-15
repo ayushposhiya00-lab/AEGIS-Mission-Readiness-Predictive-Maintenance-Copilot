@@ -35,26 +35,26 @@ submission:
     AI4I Ground Armor, NASA N-CMAPSS Turbofan), Explainable AI (XAI) feature attribution, live WebSocket
     telemetry streaming, and a bilingual Groq LPU Llama 3.3 70B Copilot that autonomously creates work orders.
 
-  key_features: >
-    Multi-Model ML Predictive Engine (NASA IMS Bearing, AI4I Ground Armor, NASA N-CMAPSS Turbofan)
-    Explainable AI (XAI) Feature Attribution with mathematical percentage contribution breakdown
-    Bilingual Autonomous AI Copilot (English & Hinglish) powered by Groq LPU Llama 3.3 70B & defense RAG
-    Real-Time WebSocket Telemetry Streaming with interactive mechanical anomaly fault injection
-    High-Speed Vectorized Batch Telemetry Ingestion scoring 5,000+ records in under 1 second
-    Download Word file of maintenance plan and Print PDF file of perticular assest detail.
+  key_features:
+    - "Multi-Model ML Predictive Engine (NASA IMS Bearing, AI4I Ground Armor, NASA N-CMAPSS Turbofan)"
+    - "Explainable AI (XAI) Feature Attribution with mathematical percentage contribution breakdown"
+    - "Bilingual Autonomous AI Copilot (English & Hinglish) powered by Groq LPU Llama 3.3 70B & defense RAG"
+    - "Real-Time WebSocket Telemetry Streaming with interactive mechanical anomaly fault injection"
+    - "High-Speed Vectorized Batch Telemetry Ingestion scoring 5,000+ records in under 1 second"
+    - "Download Word file of maintenance plan and Print PDF file of particular asset detail"
 
   tech_stack:
-  languages: ["Python", "JavaScript", "SQL"]
-  frameworks: ["FastAPI", "React", "Vite", "Uvicorn"]
-  ibm_technologies: "IBM Bob IDE-For Code Review And Debugging"
-  databases: "SQLite"
-  other: ["scikit-learn", "Groq LPU", "WebSockets", "pandas", "NumPy", "joblib", "Lucide React"]
+    languages: ["Python", "JavaScript", "SQL"]
+    frameworks: ["FastAPI", "React", "Vite", "Uvicorn"]
+    ibm_technologies: "IBM Bob IDE - For Code Review And Debugging"
+    databases: "SQLite"
+    other: ["scikit-learn", "Groq LPU", "WebSockets", "pandas", "NumPy", "joblib", "Lucide React"]
 
   what_we_are_most_proud_of: >
     Combining deterministic Explainable AI (XAI) feature attribution with an autonomous bilingual
     (English & Hinglish) defense Copilot that doesn't just display sensor graphs, but understands
-    technician vernacular and autonomously dispatches formal work orders into SQLite. Also we can 
-    download word file of maintenance plan and Print PDF file of perticular assest detail.
+    technician vernacular and autonomously dispatches formal work orders into SQLite. Also we can
+    download word file of maintenance plan and Print PDF file of particular asset detail.
 
   known_limitations: >
     Live telemetry streaming uses statistical simulations based on NASA distributions rather than
